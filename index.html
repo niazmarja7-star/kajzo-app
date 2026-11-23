@@ -1861,6 +1861,46 @@
          to keep as the gig row's own cover copy when the storage-bucket
          upload could not be used. The resized copy fits both, so the
          cover the seller picked is the cover every account sees. */
+      /* The largest cover copy a gig row may carry (chars of data: URL).
+         A picked cover is ALWAYS re-encoded through fitCoverDataUrl
+         before it is stored in the row. The old pipeline stored the
+         resized picture only when it happened to fit an arbitrary cap
+         and silently wrote an EMPTY cover_url when it did not — the
+         seller kept seeing their own picture locally (from the pending
+         copy) while the database row carried nothing, so every other
+         account got the stock fallback image: the recurring "my gig's
+         image changed to a demo image" bug. Now the picture is shrunk
+         step by step until it fits, so a gig row NEVER ends up
+         coverless while the seller picked an image; null comes back
+         only for a file the browser cannot decode at all, and the
+         forms refuse such a file with a clear message instead of
+         publishing a gig whose cover would be lost. */
+      var COVER_ROW_MAX = 1200000;
+      function fitCoverDataUrl(dataUrl, done){
+        var s = String(dataUrl || "");
+        if (s.indexOf("data:") !== 0){ done(null); return; }
+        if (s.length <= COVER_ROW_MAX){ done(s); return; }
+        var img = new Image();
+        img.onload = function(){
+          var w = img.width || 0, h = img.height || 0;
+          if (!w || !h){ done(null); return; }
+          var steps = [896, 768, 640, 512, 420, 340, 260];
+          var out = null;
+          for (var i=0;i<steps.length;i++){
+            try {
+              var sc = Math.min(1, steps[i] / Math.max(w, h));
+              var cw = Math.max(1, Math.round(w * sc)), ch = Math.max(1, Math.round(h * sc));
+              var cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+              cv.getContext("2d").drawImage(img, 0, 0, cw, ch);
+              out = cv.toDataURL("image/jpeg", 0.8);
+              if (out && out.length <= COVER_ROW_MAX) break;
+            } catch(e){ out = null; break; }
+          }
+          done(out || null); /* even the smallest step is returned rather than dropping the cover */
+        };
+        img.onerror = function(){ done(null); };
+        img.src = s;
+      }
       function resizeCoverFile(file, done){
         var rd = new FileReader();
         rd.onload = function(){
@@ -1869,16 +1909,22 @@
           img.onload = function(){
             try {
               var w = img.width || 0, h = img.height || 0;
-              if (!w || !h){ done(raw); return; }
+              if (!w || !h){ fitCoverDataUrl(raw, done); return; }
               var scale = Math.min(1, 1024 / Math.max(w, h));
-              if (scale >= 1 && String(raw).length <= 900000){ done(raw); return; }
+              if (scale >= 1 && String(raw).length <= 900000){ fitCoverDataUrl(raw, done); return; }
               var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
               var canvas = document.createElement("canvas"); canvas.width = cw; canvas.height = ch;
               var ctx = canvas.getContext("2d"); ctx.drawImage(img, 0, 0, cw, ch);
-              done(canvas.toDataURL("image/jpeg", 0.85) || raw);
-            } catch(e){ done(raw); }
+              fitCoverDataUrl(canvas.toDataURL("image/jpeg", 0.85) || raw, done);
+            } catch(e){ fitCoverDataUrl(raw, done); }
           };
-          img.onerror = function(){ done(raw); };
+          /* A file the browser cannot decode (e.g. an HEIC original) is
+             NOT kept as a giant raw data: URL any more — that raw copy
+             was exactly what overflowed the row cap and got dropped,
+             leaving the gig with the demo image. fitCoverDataUrl gets
+             one chance to shrink it; if it cannot be read at all, the
+             form asks for a JPG / PNG instead. */
+          img.onerror = function(){ fitCoverDataUrl(raw, done); };
           img.src = raw;
         };
         rd.onerror = function(){ done(null); };
@@ -2105,7 +2151,7 @@
          and are stripped again before the text is shown to anyone. */
       function sbEncodeDesc(g){
         var gs = gigStats(g);
-        var meta = { cat:g.cat, tags:g.tags, pkgs:g.pkgs, district:g.district, country:g.country, workType:g.workType, paused:!!g.paused, aiImage:!!g.aiImage, aiSource:g.aiSource || "", sellerName:(SELLERS[g.seller] ? SELLERS[g.seller].name : ""), sellerLevel:sellerLevelFor(g.seller).level, sellerLevelTxt:sellerLevelFor(g.seller).txt, views:gs.views, ordersTotal:gs.total, ordersPending:gs.pending, ordersDone:gs.done };
+        var meta = { cat:g.cat, tags:g.tags, pkgs:g.pkgs, district:g.district, country:g.country, workType:g.workType, paused:!!g.paused, aiImage:!!g.aiImage, aiSource:g.aiSource || "", sellerName:(SELLERS[g.seller] ? SELLERS[g.seller].name : ""), sellerLevel:sellerLevelFor(g.seller).level, sellerLevelTxt:sellerLevelFor(g.seller).txt, views:gs.views, ordersTotal:gs.total, ordersPending:gs.pending, ordersDone:gs.done, lid: g._lid || "" };
         return (g.about || "") + SB_META_MARK + JSON.stringify(meta);
       }
       function sbDecodeDesc(desc){
@@ -2139,7 +2185,7 @@
           title: row.title || "Untitled gig", tags: meta.tags || [], rating: 0, reviews: 0,
           orders: Number(meta.ordersTotal) || 0, ordersPending: Number(meta.ordersPending) || 0, ordersDone: Number(meta.ordersDone) || 0, views: Number(meta.views) || 0,
           aiImage: !!meta.aiImage, aiSource: meta.aiSource || "", aiReported: false, paused: !!meta.paused,
-          about: dec.about, pkgs: pkgs, revs: [] };
+          about: dec.about, pkgs: pkgs, revs: [], _lid: meta.lid || "" };
         /* Remember the stats signature the row already carries, so the
            owner's stats publisher only writes when a number really moved. */
         gigObj._pubSig = gigObj.views + "|" + gigObj.orders + "|" + gigObj.ordersPending + "|" + gigObj.ordersDone;
@@ -2289,7 +2335,7 @@
         var keep = [];
         loadPendingGigs().forEach(function(pg){
           var match = null;
-          remote.forEach(function(r){ if (!match && (r.id === pg.id || (!!sbUser && r.sbUserId === sbUser.id && r.title === pg.title))) match = r; });
+          remote.forEach(function(r){ if (!match && (r.id === pg.id || (pg._lid && r._lid && pg._lid === r._lid) || (!!sbUser && r.sbUserId === sbUser.id && r.title === pg.title))) match = r; });
           if (match){
             /* REPAIR: this gig's database row exists but was saved with
                an EMPTY cover (the bucket upload failed on an older
@@ -2426,12 +2472,17 @@
         var img = String(localGig.img || "");
         if (img.indexOf("https:") === 0){ apply(img); return; }
         if (img.indexOf("data:") === 0){
-          var blob = blobFromDataUrl(img);
-          if (blob){
-            sbUpload("gig-covers", blob, "covers").then(function(url){
-              apply(url || (img.length <= 1500000 ? img : null));
-            }).catch(function(){ apply(img.length <= 1500000 ? img : null); });
-          } else if (img.length <= 1500000) apply(img);
+          /* The in-row copy is the FITTED picture (fitCoverDataUrl), so
+             a large original can no longer be dropped by a size cap —
+             the repair always has a storable cover to write. */
+          fitCoverDataUrl(img, function(fitted){
+            var blob = blobFromDataUrl(img);
+            if (blob){
+              sbUpload("gig-covers", blob, "covers").then(function(url){
+                apply(url || fitted);
+              }).catch(function(){ apply(fitted); });
+            } else apply(fitted);
+          });
         }
       }
       function sbPersistGig(g, coverFile){
@@ -2441,23 +2492,23 @@
         if (g.sbSaving) return;
         g.sbSaving = true;
         var localId = g.id;
+        if (!g._lid) g._lid = localId; /* stable per-gig id, carried in the row's description meta — a retried save recognises its own row by it, never by title alone */
         function doInsert(coverUrl){
           /* THE "my gig's image changed" BUG, fixed at the root: when
              the gig-covers bucket upload could not be used, cover_url
-             used to be written EMPTY — so on this device the gig kept
+             used to be written EMPTY whenever the picked picture was
+             over an arbitrary size cap — so on this device the gig kept
              showing the seller's uploaded picture (from the local
              pending copy), while every OTHER account loaded the row,
-             found no cover, and saw the stock fallback image instead.
-             Now the row itself carries the cover: the bucket URL when
-             the upload worked, otherwise the resized copy of the picked
-             picture saved into cover_url — the same permanence pattern
-             the profile photo uses — so every account, on every device,
-             sees the exact image the seller uploaded. */
+             found no cover, and saw the stock fallback image instead
+             (verified in the live database: gig rows with cover_url =
+             ''). Now the row itself carries the cover: the bucket URL
+             when the upload worked, otherwise the picked picture
+             re-encoded by fitCoverDataUrl until it fits the row —
+             never dropped, never empty while the seller has a picture,
+             so every account, on every device, sees the exact image
+             the seller uploaded. */
           var cover = coverUrl || "";
-          if (!cover && g.img){
-            if (String(g.img).indexOf("data:") !== 0) cover = g.img;
-            else if (String(g.img).length <= 1500000) cover = g.img;
-          }
           var payload = { user_id: sbUser.id, title: g.title, description: sbEncodeDesc(g), price: g.pkgs[0].price, cover_url: cover };
           sb.from("gigs").insert(payload).select("id").single().then(function(res){
             g.sbSaving = false;
@@ -2465,29 +2516,68 @@
             if (res.data && res.data.id){
               g.id = String(res.data.id);
               g.sbUserId = sbUser.id;
-              untrackPendingGig(localId);
-              toast("Gig saved permanently in the database ✓");
+              if (cover) untrackPendingGig(localId);
+              /* A row saved WITHOUT its cover (the picture could not be
+                 encoded at all) keeps its pending copy, so the cover
+                 repair in mergePendingGigs still has the seller's real
+                 picture to finish the job with instead of losing it. */
+              if (cover) toast("Gig saved permanently in the database ✓");
               renderGigs();
             }
           }).catch(function(){ g.sbSaving = false; });
         }
-        if (coverFile){
-          sbUpload("gig-covers", coverFile, "covers").then(function(url){
-            if (url){ g.img = url; persistPendingGigs(); renderGigs(); }
-            doInsert(url);
-          });
-        } else if (g.img && g.img.indexOf("data:") === 0){
-          /* A restored pending gig whose cover exists only as a local
-             data: copy — upload it to the bucket first so the database
-             row keeps the real cover instead of an empty one. */
-          var blob = blobFromDataUrl(g.img);
-          if (blob){
-            sbUpload("gig-covers", blob, "covers").then(function(url){
+        function insertWithCover(bucketUrl){
+          if (bucketUrl){ doInsert(bucketUrl); return; }
+          if (g.img && String(g.img).indexOf("data:") === 0){
+            fitCoverDataUrl(g.img, function(fitted){ doInsert(fitted || ""); });
+          } else doInsert(g.img || "");
+        }
+        function uploadThenInsert(){
+          if (coverFile){
+            sbUpload("gig-covers", coverFile, "covers").then(function(url){
               if (url){ g.img = url; persistPendingGigs(); renderGigs(); }
-              doInsert(url);
-            });
-          } else doInsert(null);
-        } else doInsert(null);
+              insertWithCover(url);
+            }).catch(function(){ insertWithCover(null); });
+          } else if (g.img && String(g.img).indexOf("data:") === 0){
+            /* A restored pending gig whose cover exists only as a local
+               data: copy — upload it to the bucket first so the database
+               row keeps the real cover instead of an empty one. */
+            var blob = blobFromDataUrl(g.img);
+            if (blob){
+              sbUpload("gig-covers", blob, "covers").then(function(url){
+                if (url){ g.img = url; persistPendingGigs(); renderGigs(); }
+                insertWithCover(url);
+              }).catch(function(){ insertWithCover(null); });
+            } else insertWithCover(null);
+          } else insertWithCover(null);
+        }
+        /* Duplicate guard: an earlier insert of THIS gig may already
+           have reached the database while its response never reached
+           this device (the app was closed mid-save) — the gig stayed
+           pending and the next sign-in inserted it AGAIN (the two
+           identical "Logo" rows in the live table). The row carries
+           this gig's _lid in its meta: if a row with that lid is
+           already mine, adopt it — repairing its cover from the local
+           copy when the row has none — instead of posting a copy. */
+        sb.from("gigs").select("id,cover_url,description").eq("user_id", sbUser.id).eq("title", g.title).limit(10).then(function(res){
+          var found = null;
+          if (!res.error && res.data){
+            for (var i=0;i<res.data.length;i++){
+              var m = sbDecodeDesc(res.data[i].description).meta || {};
+              if (m.lid && m.lid === g._lid){ found = res.data[i]; break; }
+            }
+          }
+          if (found){
+            g.sbSaving = false;
+            g.id = String(found.id);
+            g.sbUserId = sbUser.id;
+            untrackPendingGig(localId);
+            if (!safeImgUrl(found.cover_url, "") && g.img) sbRepairGigCover(g, g);
+            renderGigs();
+            return;
+          }
+          uploadThenInsert();
+        }).catch(function(){ uploadThenInsert(); });
       }
       function sbSaveProfile(){
         if (!sb || !sbUser || !user) return;
@@ -2689,25 +2779,32 @@
           function doUpdate(coverUrl){
             var payload = { title: g.title, description: sbEncodeDesc(g), price: g.pkgs[0].price };
             /* Cover: a fresh bucket URL wins; otherwise the gig's
-               current image (an https URL, a bundled asset, or the
-               resized data: copy — the same permanence rule sbPersistGig
-               uses, so the row always carries the seller's real cover). */
+               current image — an https URL, or the resized data: copy
+               re-encoded by fitCoverDataUrl so it always fits the row
+               (the caller resolves that case before calling here).
+               An "assets/…" path is NEVER written: that is the stock
+               fallback picture the list shows for a coverless row, and
+               saving it as cover_url would cement the demo image into
+               the database as if the seller had chosen it — exactly how
+               edited gigs kept their demo image. With no usable cover,
+               the column is left untouched instead. */
             var cover = coverUrl || "";
-            if (!cover && g.img){
-              if (String(g.img).indexOf("data:") !== 0) cover = g.img;
-              else if (String(g.img).length <= 1500000) cover = g.img;
-            }
+            if (!cover && g.img && String(g.img).indexOf("https:") === 0) cover = g.img;
             if (cover) payload.cover_url = cover;
             sb.from("gigs").update(payload).eq("id", g.id).eq("user_id", sbUser.id).then(function(res){
               finish(!(res && res.error));
             }).catch(function(){ finish(false); });
           }
+          function updateWithLocalCover(){
+            if (g.img && String(g.img).indexOf("data:") === 0) fitCoverDataUrl(g.img, function(fitted){ doUpdate(fitted || null); });
+            else doUpdate(null);
+          }
           if (coverFile){
             sbUpload("gig-covers", coverFile, "covers").then(function(url){
-              if (url){ g.img = url; persistPendingGigs(); }
-              doUpdate(url);
-            }).catch(function(){ doUpdate(null); });
-          } else doUpdate(null);
+              if (url){ g.img = url; persistPendingGigs(); doUpdate(url); }
+              else updateWithLocalCover();
+            }).catch(function(){ updateWithLocalCover(); });
+          } else updateWithLocalCover();
           return;
         }
         /* Not a database row yet: keep the edited copy in the pending
@@ -3248,6 +3345,7 @@
          ===================================================================== */
       var sbMsgSeen = {};           /* database message id -> true once applied to a thread */
       var sbMsgInitialDone = false; /* the first load after sign-in is history: no unread / notification spam for old messages */
+      var sbMsgGigRetry = false;    /* a message load that skipped rows because their gig was not loaded yet schedules ONE gigs reload (which reloads the inbox right after) */
       var sbMsgLoading = false;
       var sbMsgSyncing = false;
       var sbNameCache = {};         /* Supabase account id -> display name (from the profiles table) */
@@ -3297,6 +3395,16 @@
             else if (conv.otherRole === "Buyer" && ord) peerId = ord.buyerSbId || null;
           }
           if (peerId && peerId === sbUser.id) peerId = null; /* a message is never addressed to yourself */
+          /* A message with NO receiver and NO order can never be
+             delivered, and reloading it can never rebuild a thread —
+             writing it anyway saved rows the loader itself has to skip
+             ("no receiver recorded"), so the chat looked sent on this
+             device but existed nowhere after leaving and coming back.
+             Keep it in the on-device queue instead: it is saved for
+             real once the other side's account can be resolved (their
+             gig row / order has loaded), and the text stays visible in
+             this device's thread meanwhile. */
+          if (!peerId && !ord){ if (allowQueue) queuePendingMessage(conv, msg); if (done) done(false); return; }
           var meta = { to: peerId || "", gig: row ? row.id : (gig && /^[0-9a-fA-F-]{36}$/.test(gig.id) ? gig.id : ""), role: conv ? (conv.otherRole || "Seller") : "Seller", name: conv ? (conv.otherName || "") : "" };
           var payload = { sender_id: sbUser.id, body: sbMsgEncode(msg.text, meta) };
           /* Tie the message to its order (messages.order_id) whenever this
@@ -3304,7 +3412,7 @@
           if (ord) payload.order_id = ord.sbId;
           sb.from("messages").insert(payload).select("id").single().then(function(res){
             if (res.error){ if (allowQueue) queuePendingMessage(conv, msg); if (done) done(false); return; }
-            if (res.data && res.data.id) sbMsgSeen[res.data.id] = true; /* the loader must not apply my own saved row a second time */
+            if (res.data && res.data.id){ sbMsgSeen[res.data.id] = true; msg.sbId = res.data.id; } /* the loader must not apply my own saved row a second time — the saved id on the local copy makes that check exact */
             if (done) done(true);
           }).catch(function(){ if (allowQueue) queuePendingMessage(conv, msg); if (done) done(false); });
         });
@@ -3380,6 +3488,7 @@
         rows.sort(function(a,b){ return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
         var isInitial = !sbMsgInitialDone;
         var changed = false;
+        var skippedForGig = false;
         var unknownIds = [];
         rows.forEach(function(m){
           if (sbMsgSeen[m.id]) return;
@@ -3408,7 +3517,7 @@
             peerRole = meta.role === "Buyer" ? "Seller" : "Buyer";
           }
           var gig = gigId ? findGig(String(gigId)) : null;
-          if (!gig) return; /* gig not loaded yet — the row stays unseen and is retried on the next load, never dropped */
+          if (!gig){ skippedForGig = true; return; } /* gig not loaded yet — the row stays unseen and is retried (scheduled below), never dropped */
           gigId = gig.id;
           if (!peerName) peerName = (peerId && sbNameCache[peerId]) || (peerRole === "Seller" && SELLERS[gig.seller] ? SELLERS[gig.seller].name : null) || "KAJZO User";
           if (peerId && !sbNameCache[peerId] && unknownIds.indexOf(peerId) === -1) unknownIds.push(peerId);
@@ -3419,6 +3528,7 @@
           }
           if (peerId && !conv.sbPeerId) conv.sbPeerId = peerId;
           conv.sbThread = true;
+          conv.gigTitle = gig.title; /* kept on the conversation so the inbox row still shows if the gig later leaves the loaded list */
           var who = mine ? "me" : "other";
           var dup = conv.msgs.some(function(x){ return (x.sbId && x.sbId === m.id) || (x.text === dec.text && x.who === who && Math.abs((x.ts || 0) - ts) < 10000); });
           sbMsgSeen[m.id] = true;
@@ -3434,6 +3544,14 @@
           }
         });
         sbMsgInitialDone = true;
+        if (skippedForGig && !sbMsgGigRetry){
+          /* Rows were skipped only because their gig is not in the list
+             yet (this load raced the gigs load): reload the gigs once —
+             sbLoadGigs reloads the inbox at its end, so those rows land
+             in their threads instead of waiting for the next poll. */
+          sbMsgGigRetry = true;
+          setTimeout(function(){ sbMsgGigRetry = false; sbLoadGigs(); }, 1500);
+        }
         if (unknownIds.length) sbResolveNames(unknownIds);
         if (changed){ sortConversations(); renderChatList(); if (activeChatId) renderChatMsgs(); updateMsgCounts(); }
       }
@@ -3506,6 +3624,13 @@
       }
       function sbApplyAuthUser(au){
         if (!au) return;
+        /* A different account than the one whose messages were loaded
+           in this page session (the owner tests exactly this way:
+           sign in with one Gmail, then look from another) starts the
+           inbox bookkeeping fresh — the previous account's seen-set
+           must never suppress this account's saved threads, and its
+           first load counts as history, not as a burst of new mail. */
+        if (!sbUser || sbUser.id !== au.id){ sbMsgSeen = {}; sbMsgInitialDone = false; }
         sbUser = au;
         var meta = au.user_metadata || {};
         var fullName = meta.full_name || meta.name || (au.email ? au.email.split("@")[0] : "KAJZO User");
@@ -4113,7 +4238,7 @@
         var tabs = document.querySelectorAll("[data-nav]");
         for (var j=0;j<tabs.length;j++) tabs[j].classList.toggle("active", tabs[j].getAttribute("data-nav") === name);
         if (name === "profile") renderProfile();
-        if (name === "messages") renderChatList();
+        if (name === "messages"){ renderChatList(); if (typeof sbLoadMessages === "function") sbLoadMessages(); } /* entering the inbox ALWAYS reloads the saved threads from the database — leaving and coming back must show every saved message, not just what this session happened to catch live */
         window.scrollTo({ top:0 });
       }
       var navBtns = document.querySelectorAll("[data-nav]");
@@ -4756,7 +4881,7 @@
         var conv = findConv(gigId, otherName, orderNo || null);
         if (!conv){
           var nowTs = Date.now();
-          conv = { id:"c" + (++chatSeq), gigId:gigId, sellerId:g.seller, otherName:otherName, otherRole:otherRole, orderNo:orderNo || null, msgs:[], replyIdx:0, typing:false, unread:0, updatedAt:nowTs };
+          conv = { id:"c" + (++chatSeq), gigId:gigId, gigTitle:g.title, sellerId:g.seller, otherName:otherName, otherRole:otherRole, orderNo:orderNo || null, msgs:[], replyIdx:0, typing:false, unread:0, updatedAt:nowTs };
           conv.msgs.push({ who:"other", ts:nowTs, t:fmtTime(nowTs), text: otherRole === "Seller"
             ? "Hi there! I am " + otherName + ". Ask me anything about this gig — price, delivery or the work itself."
             : "Hi! I am " + otherName + ". I would like to talk about this order." });
@@ -4802,12 +4927,14 @@
           return;
         }
         $("chatList").innerHTML = conversations.map(function(c){
-          var g = findGig(c.gigId); if (!g) return "";
-          if (cq && (c.otherName + " " + g.title).toLowerCase().indexOf(cq) === -1) return "";
+          var g = findGig(c.gigId);
+          if (!g && !c.gigTitle) return ""; /* gig not in the loaded list and no title was kept on the conversation — nothing truthful to show */
+          var gTitle = g ? g.title : c.gigTitle;
+          if (cq && (c.otherName + " " + gTitle).toLowerCase().indexOf(cq) === -1) return "";
           /* last message by time (serial order inside chat is oldest → newest) */
           var sorted = c.msgs.slice().sort(function(a,b){ return (a.ts||0) - (b.ts||0); });
           var last = sorted[sorted.length - 1];
-          var s = SELLERS[c.sellerId];
+          var s = SELLERS[c.sellerId] || { name: c.otherName || "KAJZO User", grad: "#147a3e", photo: null };
           var av = '<span class="avatar-wrap">' + (c.otherRole === "Seller" ? avatarHTML(s) : '<span class="avatar" style="background:#0077b6">' + initials(c.otherName) + '</span>') + '<span class="online-dot" title="Online now"></span></span>';
           var when = last ? (last.ts ? timeAgo(last.ts) : last.t) : "";
           return '<button class="conv-row' + (c.id === activeChatId ? " active" : "") + '" type="button" data-conv="' + c.id + '">' + av +
@@ -4830,8 +4957,9 @@
         $("chatEmpty").hidden = !!conv;
         $("chatMain").hidden = !conv;
         if (!conv) return;
-        var g = findGig(conv.gigId); if (!g) return;
-        var s = SELLERS[conv.sellerId];
+        var g = findGig(conv.gigId);
+        if (!g) g = { id: conv.gigId, title: conv.gigTitle || "Gig", img: "", seller: conv.sellerId }; /* the saved thread is real even when its gig sits outside the loaded list — the messages still open and read */
+        var s = SELLERS[conv.sellerId] || { name: conv.otherName || "KAJZO User", grad: "#147a3e", photo: null };
         var av = conv.otherRole === "Seller" ? avatarHTML(s) : '<span class="avatar" style="background:#0077b6">' + initials(conv.otherName) + '</span>';
         $("chatHead").innerHTML =
           '<button class="btn btn-ghost chat-back" type="button" id="chatBackBtn" style="padding:.45rem .7rem;">←</button>' + av +
@@ -6037,7 +6165,7 @@
           var f = this.files && this.files[0]; if (!f) return;
           pgCoverFileObj = f;
           resizeCoverFile(f, function(dataUrl){
-            if (!dataUrl) return;
+            if (!dataUrl){ pgCoverFileObj = null; toast("That image could not be read — please choose a JPG or PNG image"); return; }
             pgCoverData = dataUrl;
             pgCover = dataUrl;
             var pv = $("pgCoverPreview");
@@ -6187,7 +6315,7 @@
         var f = this.files && this.files[0]; if (!f) return;
         egCoverFileObj = f;
         resizeCoverFile(f, function(dataUrl){
-          if (!dataUrl) return;
+          if (!dataUrl){ egCoverFileObj = null; toast("That image could not be read — please choose a JPG or PNG image"); return; }
           egCoverData = dataUrl;
           var pv = $("egCoverPreview");
           if (pv){ pv.src = dataUrl; pv.hidden = false; }
