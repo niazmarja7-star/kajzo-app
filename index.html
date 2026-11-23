@@ -1227,33 +1227,15 @@
       ];
       function catName(id){ for (var i=0;i<CATS.length;i++) if (CATS[i].id===id) return CATS[i].name; return id; }
 
+      /* Sellers are REAL accounts only. This map used to ship 25 invented
+         demo sellers (fake names, fake levels like "Top Rated", fake
+         reviews history) — removed on purpose: the only built-in entry is
+         the app owner's own real seller profile for his real gig below.
+         Every other seller entry is created at runtime from a real row
+         of the Supabase gigs / profiles tables (see sbRowToGig and
+         sbLoadProfilesForGigs), never from invented data. */
       var SELLERS = {
-        marjan:  { name:"Abdullah Al-Marjan", user:"@marjanvai", level:"top", levelTxt:"Top Rated", place:"ঢাকা, বাংলাদেশ", district:"ঢাকা", since:"2023", lang:"বাংলা, English", resp:"১ ঘণ্টায় উত্তর", grad:"#00a651", photo:null, about:"ওয়েবসাইট, লোগো ও গ্রাফিক ডিজাইন, ফেসবুক অ্যাড বুস্টিং আর ইউটিউব চ্যানেল গ্রোথ — সব ডিজিটাল সার্ভিস এক জায়গায়।" },
-        tania:   { name:"Tania Rahman", user:"@taniaedits", level:"2", levelTxt:"Level 2 Seller", place:"চট্টগ্রাম, বাংলাদেশ", district:"চট্টগ্রাম", since:"2022", lang:"বাংলা, English", resp:"৩০ মিনিটে উত্তর", grad:"#e05252", photo:null, about:"৩ বছরের অভিজ্ঞ ভিডিও এডিটর। ইউটিউব লং ভিডিও, Shorts ও Reels।" },
-        rakib:   { name:"Rakib Hasan", user:"@rakibwp", level:"2", levelTxt:"Level 2 Seller", place:"খুলনা, বাংলাদেশ", district:"খুলনা", since:"2021", lang:"বাংলা, English", resp:"২ ঘণ্টায় উত্তর", grad:"#0077b6", photo:null, about:"WordPress বিশেষজ্ঞ। ই-কমার্স, পেমেন্ট গেটওয়ে ও স্পিডসহ পূর্ণ ওয়েবসাইট।" },
-        nusrat:  { name:"Nusrat Jahan", user:"@nusratwrites", level:"new", levelTxt:"New Seller", place:"রাজশাহী, বাংলাদেশ", district:"রাজশাহী", since:"2025", lang:"বাংলা, English", resp:"১ ঘণ্টায় উত্তর", grad:"#7209b7", photo:null, about:"SEO লেখক। বাংলা ও ইংরেজিতে গুগলে র‍্যাংক করা আর্টিকেল।" },
-        sakib:   { name:"Sakib Ahmed", user:"@sakibvoice", level:"top", levelTxt:"Top Rated", place:"ঢাকা, বাংলাদেশ", district:"ঢাকা", since:"2020", lang:"বাংলা, English", resp:"২০ মিনিটে উত্তর", grad:"#b45309", photo:null, about:"নিজের স্টুডিওতে প্রফেশনাল ভয়েস — বিজ্ঞাপন, ইউটিউব ও অডিওবুকের জন্য।" },
-        faria:   { name:"Faria Islam", user:"@fariadata", level:"1", levelTxt:"Level 1 Seller", place:"সিলেট, বাংলাদেশ", district:"সিলেট", since:"2024", lang:"বাংলা, English", resp:"৪ ঘণ্টায় উত্তর", grad:"#0f766e", photo:null, about:"এক্সেল ও ডেটা বিশেষজ্ঞ। ডেটা এন্ট্রি, ক্লিনিং, ড্যাশবোর্ড।" },
-        imran:   { name:"Imran Hossain", user:"@imranboost", level:"2", levelTxt:"Level 2 Seller", place:"বরিশাল, বাংলাদেশ", district:"বরিশাল", since:"2022", lang:"বাংলা, English", resp:"১ ঘণ্টায় উত্তর", grad:"#ef476f", photo:null, about:"সোশ্যাল মিডিয়া মার্কেটার। ফেসবুক অ্যাড, পেজ গ্রোথ।" },
-        mehedi:  { name:"Mehedi Hasan", user:"@mehediapp", level:"1", levelTxt:"Level 1 Seller", place:"ঢাকা, বাংলাদেশ", district:"ঢাকা", since:"2023", lang:"বাংলা, English", resp:"২ ঘণ্টায় উত্তর", grad:"#0ea5e9", photo:null, about:"Flutter দিয়ে Android ও iOS অ্যাপ ডেভেলপার।" },
-        karim:   { name:"Karim Uddin", user:"@karimtutor", level:"2", levelTxt:"Level 2 Seller", place:"গাজীপুর, বাংলাদেশ", district:"গাজীপুর", since:"2021", lang:"বাংলা", resp:"১ ঘণ্টায় উত্তর", grad:"#15803d", photo:null, about:"গণিত ও ইংরেজি গৃহশিক্ষক, ৮ বছরের অভিজ্ঞতা। বাসায় গিয়ে বা অনলাইনে পড়াই।" },
-        jalal:   { name:"Jalal Miah", user:"@jalalelectric", level:"1", levelTxt:"Level 1 Seller", place:"নারায়ণগঞ্জ, বাংলাদেশ", district:"নারায়ণগঞ্জ", since:"2022", lang:"বাংলা", resp:"৩০ মিনিটে উত্তর", grad:"#ca8a04", photo:null, about:"লাইসেন্সপ্রাপ্ত ইলেকট্রিশিয়ান। বাসা-অফিসের ওয়্যারিং, ফ্যান, লাইট, IPS মেরামত।" },
-        shofiq:  { name:"Shofiqul Islam", user:"@shofiqplumber", level:"1", levelTxt:"Level 1 Seller", place:"কুমিল্লা, বাংলাদেশ", district:"কুমিল্লা", since:"2023", lang:"বাংলা", resp:"১ ঘণ্টায় উত্তর", grad:"#0369a1", photo:null, about:"প্লাম্বার ও রাজমিস্ত্রির কাজ — বাথরুম, পাইপ, টাইলস, ছোট নির্মাণ ও মেরামত।" },
-        harun:   { name:"Harun Rashid", user:"@harunagri", level:"new", levelTxt:"New Seller", place:"বগুড়া, বাংলাদেশ", district:"বগুড়া", since:"2024", lang:"বাংলা", resp:"২ ঘণ্টায় উত্তর", grad:"#65a30d", photo:null, about:"কৃষি ও খামারের কাজে সাহায্য — ধান, সবজি, গরুর খামার ও মৌসুমি শ্রমিক ব্যবস্থাপনা।" },
-        sumon:   { name:"Sumon Ali", user:"@sumondelivery", level:"2", levelTxt:"Level 2 Seller", place:"রংপুর, বাংলাদেশ", district:"রংপুর", since:"2022", lang:"বাংলা", resp:"২০ মিনিটে উত্তর", grad:"#dc2626", photo:null, about:"মোটরসাইকেল ডেলিভারি ও পরিবহন — পার্সেল, খাবার, বাজার পৌঁছে দিই যত্নে ও সময়মতো।" },
-        rina:    { name:"Rina Begum", user:"@rinacare", level:"1", levelTxt:"Level 1 Seller", place:"ময়মনসিংহ, বাংলাদেশ", district:"ময়মনসিংহ", since:"2023", lang:"বাংলা", resp:"১ ঘণ্টায় উত্তর", grad:"#db2777", photo:null, about:"বাসার কাজ, রান্না, শিশু ও বয়স্কদের যত্ন — বিশ্বস্ত ও অভিজ্ঞ।" },
-        nasrin:  { name:"Nasrin Akter", user:"@nasrintailor", level:"2", levelTxt:"Level 2 Seller", place:"যশোর, বাংলাদেশ", district:"যশোর", since:"2021", lang:"বাংলা", resp:"১ ঘণ্টায় উত্তর", grad:"#9333ea", photo:null, about:"দর্জি ও সেলাই — শাড়ি, সালোয়ার-কামিজ, পাঞ্জাবি, স্কুল ড্রেস মাপমতো তৈরি ও মেরামত।" },
-        shila:   { name:"Shila Das", user:"@shilabeauty", level:"1", levelTxt:"Level 1 Seller", place:"দিনাজপুর, বাংলাদেশ", district:"দিনাজপুর", country:"Bangladesh", since:"2024", lang:"বাংলা", resp:"১ ঘণ্টায় উত্তর", grad:"#e11d48", photo:null, about:"বিউটি ও পার্লার সার্ভিস বাসায় — ফেসিয়াল, মেহেদি, ব্রাইডাল সাজ।" },
-        sarah:   { name:"Sarah Mitchell", user:"@sarahseo", level:"top", levelTxt:"Top Rated", place:"New York, United States", district:"New York", country:"United States", since:"2019", lang:"English", resp:"within 1 hour", grad:"#2563eb", photo:null, about:"SEO specialist from New York. I rank websites on Google with white-hat SEO, audits and content strategy." },
-        james:   { name:"James Carter", user:"@jamescodes", level:"top", levelTxt:"Top Rated", place:"London, United Kingdom", district:"London", country:"United Kingdom", since:"2018", lang:"English", resp:"within 2 hours", grad:"#111827", photo:null, about:"Full-stack developer in London. Python, APIs, automation and custom web apps for businesses worldwide." },
-        priya:   { name:"Priya Sharma", user:"@priyaai", level:"2", levelTxt:"Level 2 Seller", place:"Mumbai, India", district:"Mumbai", country:"India", since:"2022", lang:"English, Hindi", resp:"within 1 hour", grad:"#7c3aed", photo:null, about:"AI engineer from Mumbai. Custom ChatGPT chatbots, AI agents and automation for your website and WhatsApp." },
-        ahmedpk: { name:"Ahmed Khan", user:"@ahmeddesigns", level:"2", levelTxt:"Level 2 Seller", place:"Karachi, Pakistan", district:"Karachi", country:"Pakistan", since:"2021", lang:"English, Urdu", resp:"within 1 hour", grad:"#059669", photo:null, about:"Book cover and brand designer from Karachi. Eye-catching covers for Amazon KDP and print." },
-        maria:   { name:"Maria Santos", user:"@mariava", level:"1", levelTxt:"Level 1 Seller", place:"Manila, Philippines", district:"Manila", country:"Philippines", since:"2023", lang:"English, Tagalog", resp:"within 30 minutes", grad:"#db2777", photo:null, about:"Virtual assistant from Manila. Admin support, research, inbox and calendar management for busy founders." },
-        kenji:   { name:"Kenji Tanaka", user:"@kenjishoots", level:"2", levelTxt:"Level 2 Seller", place:"Tokyo, Japan", district:"Tokyo", country:"Japan", since:"2020", lang:"English, Japanese", resp:"within 3 hours", grad:"#0ea5e9", photo:null, about:"Product photographer in Tokyo. Clean, sales-ready photos for Amazon, Shopify and ads." },
-        lena:    { name:"Lena Fischer", user:"@lenatranslates", level:"top", levelTxt:"Top Rated", place:"Berlin, Germany", district:"Berlin", country:"Germany", since:"2019", lang:"English, German, French", resp:"within 2 hours", grad:"#b45309", photo:null, about:"Certified translator in Berlin. English, German, French and Spanish translation and localisation." },
-        carlos:  { name:"Carlos Silva", user:"@carlosmotion", level:"1", levelTxt:"Level 1 Seller", place:"Sao Paulo, Brazil", district:"Sao Paulo", country:"Brazil", since:"2023", lang:"English, Portuguese", resp:"within 1 hour", grad:"#16a34a", photo:null, about:"Motion designer from Sao Paulo. Animated ads, explainer videos and social media animations." },
-        fatima:  { name:"Fatima Al Noor", user:"@fatimamedia", level:"2", levelTxt:"Level 2 Seller", place:"Dubai, United Arab Emirates", district:"Dubai", country:"United Arab Emirates", since:"2022", lang:"English, Arabic", resp:"within 1 hour", grad:"#9333ea", photo:null, about:"Social media manager in Dubai. Instagram and TikTok growth, content plans and ad campaigns." },
-        david:   { name:"David Okafor", user:"@davidbuilds", level:"1", levelTxt:"Level 1 Seller", place:"Lagos, Nigeria", district:"Lagos", country:"Nigeria", since:"2023", lang:"English", resp:"within 2 hours", grad:"#ea580c", photo:null, about:"Shopify developer in Lagos. Complete online stores with payments, apps and training." }
+        marjan:  { name:"Abdullah Al-Marjan", user:"@marjanvai", level:"new", levelTxt:"New Seller", place:"ঢাকা, বাংলাদেশ", district:"ঢাকা", since:"2023", lang:"বাংলা, English", resp:"১ ঘণ্টায় উত্তর", grad:"#00a651", photo:null, about:"ওয়েবসাইট, লোগো ও গ্রাফিক ডিজাইন, ফেসবুক অ্যাড বুস্টিং আর ইউটিউব চ্যানেল গ্রোথ — সব ডিজিটাল সার্ভিস এক জায়গায়।" }
       };
       function lvlClass(l){ return l==="top" ? "lvl-top" : l==="2" ? "lvl-2" : l==="1" ? "lvl-1" : "lvl-new"; }
       /* ---------- Seller level: computed from REAL reviews & orders only ----------
@@ -3149,21 +3131,66 @@
         } catch(e){}
         setInterval(function(){ if (sbUser && sbReady && !(typeof document !== "undefined" && document.hidden)) sbLoadMessages(); }, 20000);
       }
-      /* Google sign-in NEVER navigates this page away: the app runs inside a
-         frame, and a full-page OAuth redirect replaces the app with Google's
-         blocked / error page (the "page error" users hit). Instead the OAuth
-         URL is requested without a redirect and opened in a NEW TAB —
-         the app itself always stays on screen. Gmail Continue is the ONLY
-         sign-in option: if the tab cannot open, the failure is shown on
-         the sign-in card and the button stays, ready to tap again. */
+      /* Google sign-in opens in a NEW TAB whenever a tab can be opened:
+         the app runs inside a frame in the Muse app, and a full-page
+         OAuth redirect there replaces the app with Google's blocked /
+         error page (the "page error" users hit). The tab is PRE-OPENED
+         inside the tap itself (see gmailContinue) — a window.open that
+         waits for the OAuth request to come back from the network is
+         popup-blocked by mobile Chrome and in-app browsers, which is
+         what made "Continue with Gmail" fail on phones. Only when no
+         tab can open AND this page is top-level (the live GitHub Pages
+         app) does sign-in continue in this tab and return here. Gmail
+         Continue is the ONLY sign-in option: if sign-in cannot start,
+         the failure is shown on the sign-in card and the button stays,
+         ready to tap again. */
       function sbSignInFallback(msg){
-        sbSetStatus("off", "Database: Google sign-in failed — please try again");
+        /* A failed sign-in start is NOT a dead database: the header /
+           footer pills keep the connection state the probe actually
+           measured instead of flipping to a false "Local mode". */
+        sbSetStatus("wait", "Database: Google sign-in failed — please try again");
         toast(msg);
         var se = $("siErr");
         if (se){ se.textContent = msg; se.hidden = false; }
       }
-      function sbGoogleSignIn(){
-        if (!sbInit()) return false;
+      /* Where Google sends the user back to: KAJZO's live public app
+         address — the GitHub Pages home of this app, which is also the
+         Site URL configured in Supabase and is on its redirect
+         allow-list (verified in the dashboard). Naming it explicitly
+         makes the return deterministic instead of depending on the
+         dashboard default ever staying put: the returning tab lands on
+         the live app, where sbHandleUrlSession / the library's
+         detectSessionInUrl picks up the session in the return URL and
+         signs the user in — and because the live app is the copy users
+         actually open day to day, the sign-in completes in the same
+         app they started from. */
+      var SB_OAUTH_RETURN_URL = "https://niazmarja7-star.github.io/kajzo-app/";
+      function sbOAuthReturnUrl(){ return SB_OAUTH_RETURN_URL; }
+      /* Navigate the pre-opened tab (or a fresh tab) to the Google
+         authorize URL. Returns false only when no tab could be used and
+         this page is framed, where a full-page jump would break the
+         app — the caller then shows the honest pop-up message. */
+      function sbOpenAuthTab(url, preWin){
+        if (preWin){
+          try {
+            if (!preWin.closed){ preWin.location.assign(url); try { preWin.opener = null; } catch(e){} return true; }
+          } catch(e){}
+        }
+        var w = null;
+        /* No "noopener" here: with it, window.open returns null even when
+           the tab DID open, which would misreport success as "blocked". */
+        try { w = window.open(url, "_blank"); } catch(e){ w = null; }
+        if (w){ try { w.opener = null; } catch(e){} return true; }
+        try {
+          if (window.self === window.top){ window.location.assign(url); return true; }
+        } catch(e){}
+        return false;
+      }
+      function sbClosePreWin(preWin){
+        if (preWin){ try { if (!preWin.closed) preWin.close(); } catch(e){} }
+      }
+      function sbGoogleSignIn(preWin){
+        if (!sbInit()){ sbClosePreWin(preWin); return false; }
         sbSetStatus("wait", "Database: opening Google sign-in…");
         try {
           /* One-tap return sign-in: prompt=select_account makes Google
@@ -3176,23 +3203,17 @@
           var hint = lastUsedEmail();
           var qp = { prompt:"select_account", access_type:"offline" };
           if (hint) qp.login_hint = hint;
-          /* No redirectTo is set here on purpose: the flow returns to the
-             Site URL configured in Supabase (this app), exactly as before —
-             the page never reads or copies its own address. */
-          sb.auth.signInWithOAuth({ provider:"google", options:{ skipBrowserRedirect:true, queryParams: qp } }).then(function(res){
+          var opts = { skipBrowserRedirect:true, queryParams: qp };
+          var ret = sbOAuthReturnUrl();
+          if (ret) opts.redirectTo = ret;
+          sb.auth.signInWithOAuth({ provider:"google", options: opts }).then(function(res){
             if (res && res.error) throw res.error;
             var url = res && res.data ? res.data.url : "";
             if (!url) throw new Error("no auth url");
-            var w = null;
-            /* No "noopener" here: with it, window.open returns null even when
-               the tab DID open, which would misreport success as "blocked".
-               The handle is closed again right away — only its existence is
-               used, to tell an opened tab from a genuinely blocked one. */
-            try { w = window.open(url, "_blank"); } catch(e){ w = null; }
-            if (w){ try { w.opener = null; } catch(e){} sbSetStatus("wait", "Database: finish Google sign-in in the new tab"); toast("Google opened in a new tab — just tap your Gmail account there (no password needed if you are already signed in to Google), then come back to KAJZO"); return; }
+            if (sbOpenAuthTab(url, preWin)){ sbSetStatus("wait", "Database: finish Google sign-in in the new tab"); toast("Google opened in a new tab — just tap your Gmail account there (no password needed if you are already signed in to Google), then come back to KAJZO"); return; }
             sbSignInFallback("Your browser blocked the Google tab — please allow pop-ups for KAJZO, then tap Continue with Gmail again");
-          }).catch(function(){ if (!sbDirectGoogleSignIn()) sbSignInFallback("Google sign-in could not start — please check your connection and tap Continue with Gmail again"); });
-        } catch(e){ if (!sbDirectGoogleSignIn()) sbSignInFallback("Google sign-in could not start — please check your connection and tap Continue with Gmail again"); }
+          }).catch(function(){ if (!sbDirectGoogleSignIn(preWin)) sbSignInFallback("Google sign-in could not start — please check your connection and tap Continue with Gmail again"); });
+        } catch(e){ if (!sbDirectGoogleSignIn(preWin)) sbSignInFallback("Google sign-in could not start — please check your connection and tap Continue with Gmail again"); }
         return true;
       }
       /* Direct Google sign-in — no Supabase library needed at all.
@@ -3200,19 +3221,20 @@
          which used to make sign-in impossible even with perfect internet.
          This builds the exact same Supabase Auth authorize URL the
          library would build (same project endpoint, same Google account
-         chooser, same offline access, same login hint) and opens it in a
-         new tab directly. Google's answer returns to the app's configured
-         Site URL with the session in the URL, where sbHandleUrlSession
-         (library or no library) picks it up and signs the user in. */
-      function sbDirectGoogleSignIn(){
+         chooser, same offline access, same login hint, same return
+         address) and opens it in a new tab directly. Google's answer
+         returns to the live app address with the session in the URL, where
+         sbHandleUrlSession (library or no library) picks it up and
+         signs the user in. */
+      function sbDirectGoogleSignIn(preWin){
         var hint = "";
         try { hint = lastUsedEmail(); } catch(e){}
         var url = SB_URL + "/auth/v1/authorize?provider=google&prompt=select_account&access_type=offline";
+        var ret = "";
+        try { ret = sbOAuthReturnUrl(); } catch(e){}
+        if (ret) url += "&redirect_to=" + encodeURIComponent(ret);
         if (hint) url += "&login_hint=" + encodeURIComponent(hint);
-        var w = null;
-        try { w = window.open(url, "_blank"); } catch(e){ w = null; }
-        if (!w) return false;
-        try { w.opener = null; } catch(e){}
+        if (!sbOpenAuthTab(url, preWin)) return false;
         sbSetStatus("wait", "Database: finish Google sign-in in the new tab");
         toast("Google opened in a new tab — just tap your Gmail account there, then come back to KAJZO");
         return true;
@@ -5149,18 +5171,29 @@
             if (se0){ se0.textContent = "No internet connection — KAJZO needs internet to sign in. Please connect, then tap Continue with Gmail again."; se0.hidden = false; }
             return;
           }
-          if (sbInit()){ sbGoogleSignIn(); return; }
+          /* Pre-open the Google tab NOW, synchronously inside this tap.
+             Browsers only trust a window.open that happens in the tap
+             itself: the normal flow first asks Supabase for the OAuth
+             URL (a network round-trip) and opened the tab only when the
+             answer came back — by then the tap no longer counted, so
+             mobile Chrome and in-app browsers popup-blocked the Google
+             tab and sign-in died with "browser blocked the tab" even
+             though the user really tapped. The blank tab opened here is
+             navigated to Google the moment the sign-in URL is ready
+             (sbOpenAuthTab), and closed again if sign-in cannot start
+             at all. */
+          var preWin = null;
+          try { preWin = window.open("about:blank", "_blank"); } catch(e){ preWin = null; }
+          if (sbInit()){ sbGoogleSignIn(preWin); return; }
           /* The Supabase library did not load with the page (a single
              failed CDN fetch — or Brave Shields blocking the CDN — used
              to break sign-in for the whole session and show the
              misleading "check your internet connection" error). Go
              straight to Google via sbDirectGoogleSignIn FIRST, right
-             inside this tap, while the browser still counts it as a
-             user gesture so the new tab is never popup-blocked — it
-             needs no library at all. Only if that tab cannot open do we
-             reload the library from the CDN mirrors and retry through
-             it. */
-          if (sbDirectGoogleSignIn()) return;
+             inside this tap — it needs no library at all. Only if that
+             tab cannot open do we reload the library from the CDN
+             mirrors and retry through it. */
+          if (sbDirectGoogleSignIn(preWin)) return;
           siBusy = true;
           var gb = $("gmailBtn"), rb = $("rememberedBtn");
           var gbHtml = gb ? gb.innerHTML : "";
@@ -5170,7 +5203,8 @@
             siBusy = false;
             if (gb){ gb.disabled = false; gb.innerHTML = gbHtml; }
             if (rb) rb.disabled = false;
-            if (ok && sbInit()){ sbGoogleSignIn(); return; }
+            if (ok && sbInit()){ sbGoogleSignIn(preWin); return; }
+            sbClosePreWin(preWin);
             var se = $("siErr");
             if (se){ se.textContent = "Sign-in could not start — your browser blocked the Google tab. Please allow pop-ups for KAJZO, then tap Continue with Gmail again."; se.hidden = false; }
             toast("Sign-in could not start — please allow pop-ups and try again");
