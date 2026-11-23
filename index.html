@@ -594,6 +594,13 @@
       .menu-opt.active{ border-color:var(--green); background:color-mix(in srgb, var(--green) 9%, var(--surface)); }
       .toast{ position:fixed; left:50%; bottom:5.2rem; transform:translate(-50%,140%); z-index:200; background:#222; color:#fff; padding:.75rem 1.1rem; border-radius:6px; font-weight:500; box-shadow:var(--shadow-pop); transition:transform .25s ease; max-width:92vw; text-align:center; pointer-events:none; }
       .toast.show{ transform:translate(-50%,0); }
+      .invite-banner{ background:color-mix(in srgb, var(--green) 10%, var(--surface)); border-bottom:1px solid color-mix(in srgb, var(--green) 40%, transparent); }
+      .invite-banner-in{ display:flex; align-items:center; gap:.8rem; padding-top:.65rem; padding-bottom:.65rem; }
+      .invite-banner-txt{ margin:0; flex:1; line-height:1.55; color:var(--ink); font-size:.98rem; }
+      .invite-banner-actions{ display:flex; align-items:center; gap:.5rem; flex-shrink:0; }
+      .invite-banner-x{ background:none; border:0; color:var(--ink-3); font-size:1.05rem; line-height:1; padding:.4rem .5rem; cursor:pointer; border-radius:8px; }
+      .invite-banner-x:hover{ color:var(--ink); background:var(--chip); }
+      @media (max-width:640px){ .invite-banner-in{ flex-wrap:wrap; } }
       .net-gate{ position:fixed; inset:0; z-index:300; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:1.25rem; }
       .net-gate[hidden]{ display:none; }
       .net-gate-card{ width:100%; max-width:430px; text-align:center; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:2.1rem 1.6rem 1.7rem; box-shadow:var(--shadow-pop); }
@@ -869,6 +876,18 @@
         </div>
       </div>
     </header>
+
+    <!-- Invite confirmation: visible while an invite-link code (?ref=KZ-XXXXXXXX)
+         is parked on this device and not yet saved to an account -->
+    <div class="invite-banner" id="inviteBanner" data-noi18n hidden>
+      <div class="wrap invite-banner-in">
+        <p class="invite-banner-txt" id="inviteBannerTxt"></p>
+        <div class="invite-banner-actions">
+          <button class="btn btn-green" type="button" id="inviteBannerSignIn" style="padding:.55rem 1rem;" hidden>Sign in with Gmail</button>
+          <button class="invite-banner-x" type="button" id="inviteBannerClose" aria-label="Dismiss">✕</button>
+        </div>
+      </div>
+    </div>
 
     <!-- slim header (mobile only): appears after the full header scrolls away -->
     <div class="mini-bar" id="miniBar" aria-hidden="true">
@@ -1493,6 +1512,10 @@
       var inviteLoaded = false;     /* true once the database answer for the invite list has arrived */
       var myInviter = null;         /* { name, code } once THIS account joined with someone's code */
       var INVITE_PENDING_KEY = "kajzo_pending_invite_v1"; /* a code from an invite link, kept until sign-in saves it */
+      var pendingInviterName = "";   /* display name behind the parked invite code, once resolved from the database */
+      var pendingInviterResolving = false;
+      var inviteBannerDismissed = false; /* banner hidden for this session only — the parked code itself is kept */
+      var inviteFreshCapture = false;    /* true when THIS page load brought a new invite code in through the URL */
       var availStatus = "available";
       var prefNotifs = true;
       var customTemplates = [
@@ -2706,7 +2729,14 @@
           var m = ((window.location.search || "") + "&" + (window.location.hash || "")).match(/[?&#](?:ref|invite)=([A-Za-z0-9-]{6,20})/);
           if (m){
             var code = normalizeInviteCode(m[1]);
-            if (code && window.localStorage) window.localStorage.setItem(INVITE_PENDING_KEY, code);
+            if (code && window.localStorage){
+              /* A code that is NEW to this device (or different from the
+                 one already parked) is announced at startup with a toast
+                 plus the invite banner; reopening the same link on a
+                 later visit stays quiet — the banner alone confirms it. */
+              if (window.localStorage.getItem(INVITE_PENDING_KEY) !== code) inviteFreshCapture = true;
+              window.localStorage.setItem(INVITE_PENDING_KEY, code);
+            }
           }
         } catch(e){}
       }
@@ -2716,8 +2746,62 @@
       function clearPendingInvite(){
         try { if (window.localStorage) window.localStorage.removeItem(INVITE_PENDING_KEY); } catch(e){}
       }
+      /* Resolve the parked code's owner name for the banner. Best
+         effort: the profiles lookup runs with whatever database access
+         this visitor has — when it cannot answer yet (not signed in),
+         the banner shows the code alone and the name arrives with the
+         redeem confirmation after Gmail sign-in. */
+      function resolvePendingInviterName(){
+        var code = pendingInviteCode();
+        if (!code || pendingInviterName || pendingInviterResolving || !sb) return;
+        pendingInviterResolving = true;
+        sbResolveInviteCode(code, function(inviter){
+          pendingInviterResolving = false;
+          if (inviter && inviter.full_name){ pendingInviterName = inviter.full_name; updateInviteBanner(); }
+        });
+      }
+      /* The invite confirmation bar under the header. It is the visible
+         answer to "I opened the join link and nothing happened": while
+         a code from an invite link is parked and not yet saved to an
+         account, the bar names the inviter and the code — for the
+         inviter opening their OWN link too (it explains that a
+         self-open does not count, instead of staying silent). Once the
+         code is saved, myInviter matches it and the bar hides; the
+         lasting confirmation then lives on the Invite friends page. */
+      function updateInviteBanner(){
+        var bar = $("inviteBanner"); if (!bar) return;
+        var code = pendingInviteCode();
+        if (!code || inviteBannerDismissed || (myInviter && myInviter.code === code)){ bar.hidden = true; return; }
+        var txt = $("inviteBannerTxt"); if (!txt) return;
+        var bn = (typeof LANG !== "undefined" && LANG === "bn");
+        var own = !!(sbUser && code === myInviteCode());
+        if (own){
+          txt.innerHTML = bn
+            ? "এটি আপনার নিজের ইনভাইট লিংক — কোড <b>" + esc(code) + "</b>। নিজে খুললে রেফারেল হিসেবে গোনা হবে না — বন্ধুদের পাঠান।"
+            : "This is your own invite link — code <b>" + esc(code) + "</b>. Opening it yourself does not count as a referral — share it with friends instead.";
+        } else if (pendingInviterName){
+          txt.innerHTML = bn
+            ? "আপনাকে ইনভাইট করেছেন <b>" + esc(pendingInviterName) + "</b> — কোড <b>" + esc(code) + "</b>" + (sbUser ? "। কোডটি আপনার অ্যাকাউন্টে সেভ হচ্ছে…" : "। Gmail দিয়ে সাইন ইন করলেই আপনার যোগদান ইনভাইটারের তালিকায় সেভ হয়ে যাবে — কোডের ঘরটাও ভরা থাকবে।")
+            : "You were invited by <b>" + esc(pendingInviterName) + "</b> — invite code <b>" + esc(code) + "</b>" + (sbUser ? ". Saving the code to your account…" : ". Sign in with Gmail and your join is saved to your inviter's list automatically — the code is already filled in for you.");
+        } else {
+          txt.innerHTML = bn
+            ? "আপনি ইনভাইট লিংক দিয়ে এসেছেন — ইনভাইট কোড <b>" + esc(code) + "</b>" + (sbUser ? "। কোডটি আপনার অ্যাকাউন্টে সেভ হচ্ছে…" : "। Gmail দিয়ে সাইন ইন করলেই আপনার যোগদান ইনভাইটারের তালিকায় সেভ হয়ে যাবে — কোডের ঘরটাও ভরা থাকবে।")
+            : "You arrived through an invite link — invite code <b>" + esc(code) + "</b>" + (sbUser ? ". Saving the code to your account…" : ". Sign in with Gmail and your join is saved to your inviter's list automatically — the code is already filled in for you.");
+        }
+        var sBtn = $("inviteBannerSignIn");
+        if (sBtn){
+          sBtn.hidden = !!sbUser || own;
+          sBtn.textContent = bn ? "Gmail দিয়ে সাইন ইন করুন" : "Sign in with Gmail";
+        }
+        bar.hidden = false;
+        resolvePendingInviterName();
+      }
       function sbResolveInviteCode(code, done){
-        if (!sb || !sbUser){ done(null); return; }
+        /* Only the database client is required here: resolving a code
+           to its owner's public display name is a read the banner also
+           needs BEFORE sign-in. Saving the join (sbRedeemInviteCode)
+           still refuses to run without a signed-in account. */
+        if (!sb){ done(null); return; }
         var hex = code.replace("KZ-", "").toLowerCase();
         /* Targeted lookup: an invite code is the first 8 hex characters
            of the inviter's account id, and every id whose first segment
@@ -2748,6 +2832,7 @@
             if (res && res.error){ fail("The code could not be saved — please check your connection and try again."); return; }
             myInviter = { name: snap.inviterName, code: code };
             clearPendingInvite();
+            updateInviteBanner(); /* the code is saved now — the confirmation bar steps aside */
             pushNotif("Invite code saved", "You joined KAJZO with " + snap.inviterName + "'s invite code (" + code + ") — saved to your account.", null, null);
             toast("Invite code saved — you joined with " + snap.inviterName + "'s code ✓");
             if (done) done(true, "");
@@ -2776,8 +2861,16 @@
           /* A code carried in by an invite link is redeemed now that the
              account is known — once, and only if no code was saved before. */
           var pend = pendingInviteCode();
-          if (pend && !myInviter) sbRedeemInviteCode(pend, function(){});
+          if (pend && !myInviter) sbRedeemInviteCode(pend, function(ok, msg){
+            /* A parked code that names nobody (a mistyped or stale link)
+               is dropped, so it cannot nag on every load. An own-code
+               answer keeps the parked code: the banner explains it and
+               the Invite page keeps the field filled, as asked. */
+            if (!ok && msg && msg.indexOf("was not found") !== -1) clearPendingInvite();
+            updateInviteBanner();
+          });
           else if (pend) clearPendingInvite();
+          updateInviteBanner();
           if ($("menuScreen").classList.contains("open") && menuKey === "invite") renderMenuPage();
         }
         sb.from("messages").select("body,created_at").eq("sender_id", sbUser.id).like("body", "%[[KAJZO_META]]{\"kind\":\"invite\"%").order("created_at", { ascending:true }).limit(50).then(function(res){ mergeRows(mine, res); mineDone(); }).catch(function(){ mineDone(); });
@@ -2804,6 +2897,7 @@
             byKey[key] = { name: snap.name || "KAJZO User", email: snap.email || "", ts: snap.ts || (r.created_at ? new Date(r.created_at).getTime() : Date.now()) };
           });
           inviteJoined = Object.keys(byKey).map(function(k){ return byKey[k]; }).sort(function(a,b){ return (b.ts || 0) - (a.ts || 0); });
+          updateInviteBanner();
           if ($("menuScreen").classList.contains("open") && menuKey === "invite") renderMenuPage();
           if (state.page === "profile" && user && isSignedIn()) renderProfile();
         }
@@ -3694,6 +3788,31 @@
         toast("Google opened in a new tab — just tap your Gmail account there, then come back to KAJZO");
         return true;
       }
+      /* The shared Google sign-in launcher — the exact flow the welcome
+         page's "Continue with Gmail" runs: offline gate first, the tab
+         pre-opened synchronously inside the tap, then the library OAuth
+         flow with the direct authorize-URL fallback and a library
+         reload as the last resort. Every other "Sign in with Google"
+         button (Invite friends, System Check, the invite banner) calls
+         THIS. Those buttons used to merely navigate to the sign-in
+         page, which is what made them feel broken: the dialog closed
+         and no Google account screen ever appeared. */
+      function launchGoogleSignIn(){
+        if (netIsOffline()){
+          netShowGate();
+          toast("No internet connection — KAJZO needs internet to sign in. Please connect, then try again");
+          return;
+        }
+        var preWin = null;
+        try { preWin = window.open("about:blank", "_blank"); } catch(e){ preWin = null; }
+        if (sbInit()){ sbGoogleSignIn(preWin); return; }
+        if (sbDirectGoogleSignIn(preWin)) return;
+        sbLoadLib(function(ok){
+          if (ok && sbInit()){ sbGoogleSignIn(preWin); return; }
+          sbClosePreWin(preWin);
+          sbSignInFallback("Sign-in could not start — your browser blocked the Google tab. Please allow pop-ups for KAJZO, then try again");
+        });
+      }
       /* Pick up a Google sign-in that returned with its session in the
          URL (#access_token=…&refresh_token=…) WITHOUT needing the
          Supabase library — Brave may have blocked the library entirely.
@@ -3815,6 +3934,7 @@
         if (state.page === "profile" && user) renderProfile();
         if (detailOrder && $("orderDetailScreen").classList.contains("open")) renderOrderDetail();
         if ($("menuScreen").classList.contains("open") && menuKey === "support") renderMenuPage();
+        updateInviteBanner(); /* returning to this tab (e.g. after Google sign-in in the new tab) refreshes the invite confirmation bar */
       }
       if (liveChannel){
         liveChannel.onmessage = function(ev){
@@ -5287,9 +5407,23 @@
         on("invCopyText", "click", function(){ copyText(inviteShareText(), "Invite message copied — paste it anywhere"); });
         on("invShare", "click", function(){
           var t = inviteShareText();
-          if (navigator.share){ navigator.share({ title:"Join KAJZO", text:t }).catch(function(){}); }
-          else copyText(t, "Invite message copied — paste it anywhere");
+          /* The old handler swallowed a rejected share silently: inside
+             framed webviews navigator.share exists but is refused, so
+             the tap did NOTHING at all — no share sheet, no toast. A
+             refused or throwing share now falls back to copying the
+             invite message, which always gives visible feedback; only
+             a real user cancel (AbortError) stays quiet. */
+          function fallback(){ copyText(t, "Invite message copied — paste it anywhere"); }
+          if (navigator.share){
+            var p = null;
+            try { p = navigator.share({ title:"Join KAJZO", text:t, url:inviteLink() }); } catch(e){ fallback(); return; }
+            if (p && typeof p.catch === "function") p.catch(function(err){ if (err && err.name === "AbortError") return; fallback(); });
+          } else fallback();
         });
+        /* A code carried in by an invite link (?ref=…) is ALREADY in
+           the box — the friend never has to type or paste anything. */
+        var ici = $("invCodeInput");
+        if (ici && !ici.value){ var pc0 = pendingInviteCode(); if (pc0) ici.value = pc0; }
         var irf = $("invRedeemForm");
         if (irf) irf.addEventListener("submit", function(e){
           e.preventDefault();
@@ -5320,7 +5454,15 @@
             toast(ok ? "Database is live — data saves permanently ✓" : "Database still not reachable — please check your connection and try again");
           });
         });
-        on("mpGoSignIn", "click", function(){ closeScreen("menuScreen"); goToSignIn(); });
+        /* "Sign in with Google" STARTS Google sign-in right here — the
+           same flow as the welcome page's "Continue with Gmail" (new
+           tab, Google's account chooser). It used to only close this
+           screen and jump to the sign-in page, so no Google prompt ever
+           appeared and the invite code stayed hidden behind a login the
+           user believed was already done. The screen stays open: when
+           sign-in completes, the invite reload repaints this page with
+           the code in place — no sign-out / sign-in round trip. */
+        on("mpGoSignIn", "click", function(){ launchGoogleSignIn(); });
         on("mpLangBn", "click", function(){ var b = $("langBn"); if (b) b.click(); renderMenuPage(); });
         on("mpLangEn", "click", function(){ var b = $("langEn"); if (b) b.click(); renderMenuPage(); });
         on("mpNotifToggle", "click", function(){ prefNotifs = !prefNotifs; sbSaveProfileSettings(); toast("Notifications " + (prefNotifs ? "ON" : "OFF")); renderMenuPage(); });
@@ -6064,7 +6206,7 @@
         ["Post a gig — sell to the whole world","গিগ পোস্ট করুন — সারা বিশ্বে বিক্রি করুন"],["Write in Bangla or English — buyers from countries around the world will see your gig. Add a clear title, description, your country and work type, plus three packages — Basic, Standard, Premium. Prices are set in USD ($) and shown to each buyer in their own currency.","বাংলা বা ইংরেজিতে লিখুন — সারা বিশ্বের বায়ার আপনার গিগ দেখবে। পরিষ্কার শিরোনাম, বিবরণ, আপনার দেশ ও কাজের ধরন দিন, সাথে তিনটি প্যাকেজ — Basic, Standard, Premium। দাম USD ($)-তে বসে, প্রতিটি বায়ার নিজের মুদ্রায় দেখে।"],["Gig title (Bangla or English)","গিগের শিরোনাম (বাংলা বা ইংরেজি)"],["Category","ক্যাটাগরি"],["Your country / area — anywhere in the world","আপনার দেশ / এলাকা — বিশ্বের যেকোনো জায়গা"],["Buyers filter by country. Online gigs are shown worldwide automatically.","বায়ার দেশ দিয়ে ফিল্টার করে। অনলাইন গিগ নিজে নিজেই বিশ্বজুড়ে দেখানো হয়।"],["Keywords (separate with commas)","কীওয়ার্ড (কমা দিয়ে আলাদা করুন)"],["Description","বিবরণ"],["What will the buyer get? How do you work? Why choose you?","বায়ার কী পাবেন? আপনি কীভাবে কাজ করেন? আপনাকে কেন বেছে নেবেন?"],["Upload your own cover image:","নিজের কভার ছবি আপলোড করুন:"],["Please upload your own cover image to publish the gig","গিগ প্রকাশ করতে নিজের কভার ছবি আপলোড করুন"],["Copy this text","এই লেখাটি কপি করুন"],["Automatic copy was blocked by the browser. The text is selected — long-press it (or press Ctrl+C) and choose Copy.","ব্রাউজার অটোমেটিক কপি আটকে দিয়েছে। লেখাটি সিলেক্ট করা আছে — চেপে ধরে (বা Ctrl+C চেপে) Copy বেছে নিন।"],["Cover image source","কভার ছবির উৎস"],["My own photo / design file — not AI","আমার নিজের ছবি / ডিজাইন ফাইল — AI নয়"],["AI-generated (Midjourney, DALL·E, Firefly, etc.)","AI দিয়ে তৈরি (Midjourney, DALL·E, Firefly ইত্যাদি)"],["Not sure","নিশ্চিত নই"],["KAJZO checks every uploaded picture for AI-tool metadata. AI-made images are shown with an “AI-generated image” label on the gig, so buyers can tell them apart from real photos and original work.","KAJZO প্রতিটি আপলোড করা ছবি AI-টুলের মেটাডেটার জন্য যাচাই করে। AI দিয়ে তৈরি ছবি গিগে “AI দিয়ে তৈরি ছবি” লেবেলসহ দেখানো হয়, যাতে বায়ার আসল ছবি ও নিজের কাজ থেকে আলাদা করে চিনতে পারে।"],["Your three packages (prices in USD $ — buyers see them in their own currency)","আপনার তিনটি প্যাকেজ (দাম USD $-তে — বায়ার নিজের মুদ্রায় দেখে)"],["Publish gig","গিগ প্রকাশ করুন"],["Price ($)","দাম ($)"],["Delivery (days)","ডেলিভারি (দিন)"],["Revisions","রিভিশন"],["Short description","সংক্ষিপ্ত বিবরণ"],["What is included (separate with commas)","যা যা থাকছে (কমা দিয়ে আলাদা করুন)"],["The essentials","প্রয়োজনীয় সবকিছু"],["More value included","আরও বেশি সুবিধা"],["The complete premium package","সম্পূর্ণ প্রিমিয়াম প্যাকেজ"],["Choose cover","কভার বেছে নিন"],["Custom cover image selected","নিজের কভার ছবি বেছে নেওয়া হয়েছে"],
         ["Seller mode","সেলার মোড"],["Personal balance:","ব্যক্তিগত ব্যালেন্স:"],["Profile photo: AI-generated","প্রোফাইল ছবি: AI দিয়ে তৈরি"],["Upload profile photo","প্রোফাইল ছবি আপলোড করুন"],["Selling","বিক্রি"],["Earnings","আয়"],["Custom offer templates","কাস্টম অফার টেমপ্লেট"],["Briefs","ব্রিফ"],["Share Gigs","গিগ শেয়ার করুন"],["My profile","আমার প্রোফাইল"],["Manage Gigs","গিগ পরিচালনা"],["Availability","উপলব্ধতা"],["Invite friends","বন্ধুদের আমন্ত্রণ"],["Settings","সেটিংস"],["Preferences","পছন্দসমূহ"],["Account","অ্যাকাউন্ট"],["Resources","রিসোর্স"],["Support","সাপোর্ট"],["App Status — System Check","অ্যাপের অবস্থা — সিস্টেম চেক"],["Community and legal","কমিউনিটি ও আইনি"],["Buyer mode is on","বায়ার মোড চালু আছে"],["Turn Seller mode on (above) to see Earnings, Manage Gigs and the other Selling tools.","আয়, গিগ পরিচালনা ও বাকি বিক্রির টুল দেখতে উপরে সেলার মোড চালু করুন।"],["My gigs","আমার গিগ"],["Orders placed","দেওয়া অর্ডার"],["Orders received","পাওয়া অর্ডার"],["Available balance","তোলার মতো ব্যালেন্স"],["Identity verification","পরিচয় যাচাই"],["Gmail account","Gmail অ্যাকাউন্ট"],["Guest mode — not signed in","গেস্ট মোড — সাইন ইন করা নেই"],["NID information","NID তথ্য"],["Guest mode — sign in with your own Gmail and NID from this page to verify","গেস্ট মোড — যাচাই করতে এই পেজ থেকে নিজের Gmail ও NID দিয়ে সাইন ইন করুন"],["NID review","NID যাচাই"],["Your identity has been verified — buyers and sellers can trust your profile.","আপনার পরিচয় যাচাই হয়ে গেছে — বায়ার ও সেলার আপনার প্রোফাইলে আস্থা রাখতে পারবে।"],["Your NID details are being reviewed. You can keep using KAJZO while the review runs.","আপনার NID তথ্য যাচাই চলছে। যাচাই চলার সময়ও KAJZO ব্যবহার চালিয়ে যেতে পারবেন।"],["Verified ✓","যাচাই হয়েছে ✓"],["Submitted","জমা হয়েছে"],["Connected","সংযুক্ত"],["Seller dashboard","সেলার ড্যাশবোর্ড"],["Total earnings","মোট আয়"],["Available to withdraw","তোলার মতো আছে"],["Pending clearance","ছাড়ের অপেক্ষায়"],["Active orders","চলমান অর্ডার"],["Withdraw earnings","আয় তুলুন"],["Account number","অ্যাকাউন্ট নম্বর"],["Request withdrawal","টাকা তোলার অনুরোধ করুন"],["Withdrawals are processed within 24 hours.","টাকা তোলার অনুরোধ ২৪ ঘণ্টার মধ্যে প্রক্রিয়া করা হয়।"],["Available balance:","তোলার মতো ব্যালেন্স:"],["Withdrawal history","টাকা তোলার ইতিহাস"],["No orders received yet. When a buyer orders one of your gigs, it will appear here.","এখনো কোনো অর্ডার পাননি। বায়ার আপনার কোনো গিগ অর্ডার করলে এখানে দেখা যাবে।"],["My details","আমার বিবরণ"],["Full name (NID)","পুরো নাম (NID)"],["Gmail","Gmail"],["NID number","NID নম্বর"],["Date of birth","জন্ম তারিখ"],["Phone","ফোন"],["Account type","অ্যাকাউন্টের ধরন"],["You have not posted any gigs yet","আপনি এখনো কোনো গিগ পোস্ট করেননি"],["Post your first gig and buyers will find it on the Gigs page.","আপনার প্রথম গিগ পোস্ট করুন, বায়ার সেটি গিগ পেজে খুঁজে পাবে।"],["Post your first gig","আপনার প্রথম গিগ পোস্ট করুন"],["My orders","আমার অর্ডার"],["No orders yet. When you buy a gig, it will appear here.","এখনো কোনো অর্ডার নেই। গিগ কিনলে এখানে দেখা যাবে।"],
         ["Welcome to KAJZO — Official Global App","KAJZO-তে স্বাগতম — অফিসিয়াল গ্লোবাল অ্যাপ"],["Join from any country in 3 steps: 1) mobile number, 2) Gmail, 3) ID / NID information. Then post gigs, message and order worldwide. Bangla and English both work.","যেকোনো দেশ থেকে ৩ ধাপে যোগ দিন: ১) মোবাইল নম্বর, ২) Gmail, ৩) ID / NID তথ্য। তারপর গিগ পোস্ট করুন, মেসেজ করুন ও বিশ্বজুড়ে অর্ডার করুন। বাংলা ও English দুটোই চলে।"],["Step 1 — Mobile:","ধাপ ১ — মোবাইল:"],["your mobile number with country code","দেশের কোডসহ আপনার মোবাইল নম্বর"],["Step 2 — Country:","ধাপ ২ — দেশ:"],["pick your country / area so buyers near you — and worldwide — can find you","আপনার দেশ / এলাকা বেছে নিন, যাতে কাছের — ও বিশ্বজুড়ে — বায়ার আপনাকে খুঁজে পায়"],["Step 3 — ID / NID:","ধাপ ৩ — ID / NID:"],["your national ID number and front/back photos — for trust","আস্থার জন্য আপনার জাতীয় ID নম্বর ও সামনে/পেছনের ছবি"],["Continue with Gmail","Gmail দিয়ে এগিয়ে যান"],["Sign-in runs through Supabase Auth (Google). Your profile, gigs, orders, messages and notifications are saved in the database and stay on every device.","সাইন ইন হয় Supabase Auth (Google) দিয়ে। আপনার প্রোফাইল, গিগ, অর্ডার, মেসেজ ও নোটিফিকেশন ডাটাবেসে সেভ থাকে এবং সব ডিভাইসে থাকে।"],["Continue with email & NID form instead","বরং ইমেইল ও NID ফর্ম দিয়ে এগিয়ে যান"],["then verify with your NID","তারপর NID দিয়ে যাচাই করুন"],["Your Gmail account","আপনার Gmail অ্যাকাউন্ট"],["Gmail address","Gmail ঠিকানা"],["NID card information","NID কার্ডের তথ্য"],["Full name (as on NID card)","পুরো নাম (NID কার্ডে যেমন আছে)"],["Mobile number","মোবাইল নম্বর"],["Your country / area","আপনার দেশ / এলাকা"],["NID card photo — front","NID কার্ডের ছবি — সামনে"],["NID card photo — back","NID কার্ডের ছবি — পেছনে"],["Verify NID & create my profile","NID যাচাই করে আমার প্রোফাইল তৈরি করুন"],["Your NID details are used to verify your identity so buyers and sellers can trust your profile.","আপনার NID তথ্য পরিচয় যাচাইয়ে ব্যবহার হয়, যাতে বায়ার ও সেলার আপনার প্রোফাইলে আস্থা রাখতে পারে।"],["Please enter a valid Gmail address (ending in @gmail.com).","সঠিক Gmail ঠিকানা দিন (@gmail.com দিয়ে শেষ হতে হবে)।"],["Please enter your full NID number (at least 10 digits).","আপনার পুরো NID নম্বর দিন (কমপক্ষে ১০ সংখ্যা)।"],["Please enter a valid mobile number.","সঠিক মোবাইল নম্বর দিন।"],["NID photo attached","NID ছবি যোগ হয়েছে"],["Sign in with your Gmail account — that is all you need. No password to set here, no ID / NID, no forms to fill. Then post gigs, message and order worldwide. Bangla and English both work.","আপনার Gmail অ্যাকাউন্ট দিয়ে সাইন ইন করুন — এটুকুই যথেষ্ট। এখানে কোনো পাসওয়ার্ড বসাতে হবে না, কোনো ID / NID লাগবে না, কোনো ফর্ম পূরণ করতে হবে না। তারপর গিগ পোস্ট করুন, মেসেজ করুন ও বিশ্বজুড়ে অর্ডার করুন। বাংলা ও English দুটোই চলে।"],["Tap the button and Google shows your Gmail accounts — tap yours, tap Continue, and you are signed in. Your profile, gigs, orders, messages and notifications are saved in the database and stay on every device.","বাটনে ট্যাপ করলে Google আপনার Gmail অ্যাকাউন্টগুলো দেখাবে — নিজেরটায় ট্যাপ করুন, Continue চাপুন, সাইন ইন হয়ে যাবে। আপনার প্রোফাইল, গিগ, অর্ডার, মেসেজ ও নোটিফিকেশন ডাটাবেসে সেভ থাকে এবং সব ডিভাইসে থাকে।"],["You stay signed in.","আপনি সাইন ইন অবস্থায়ই থাকবেন।"],["Once you sign in, KAJZO keeps you signed in on this device until you tap Log out — closing the app never logs you out. Next time, just tap Continue with Gmail and pick your account.","একবার সাইন ইন করলে, Log out না চাপা পর্যন্ত KAJZO আপনাকে এই ডিভাইসে সাইন ইন রাখবে — অ্যাপ বন্ধ করলে লগ আউট হয় না। পরের বার শুধু Continue with Gmail চেপে নিজের অ্যাকাউন্ট বেছে নিলেই হবে।"],["One tap on Google's account screen — no password needed","Google-এর অ্যাকাউন্ট স্ক্রিনে এক ট্যাপ — পাসওয়ার্ড লাগবে না"],["Sign in:","সাইন ইন:"],["Just tap Continue with Gmail — no ID, no paperwork. You stay signed in until you tap Log out.","শুধু Continue with Gmail চাপুন — কোনো ID লাগবে না, কোনো কাগজপত্র লাগবে না। Log out না চাপা পর্যন্ত আপনি সাইন ইন অবস্থায়ই থাকবেন।"],
-        ["Ready-made replies you can reuse in chats and custom offers.","চ্যাট ও কাস্টম অফারে আবার ব্যবহার করা যায় এমন তৈরি উত্তর।"],["Copy template","টেমপ্লেট কপি করুন"],["Add a template","টেমপ্লেট যোগ করুন"],["Template name","টেমপ্লেটের নাম"],["Template text","টেমপ্লেটের লেখা"],["Save template","টেমপ্লেট সেভ করুন"],["Template saved","টেমপ্লেট সেভ হয়েছে"],["Template copied","টেমপ্লেট কপি হয়েছে"],["Buyers post briefs describing work they need. Respond to a brief to get the conversation started.","বায়ার তাদের দরকারি কাজের ব্রিফ পোস্ট করে। ব্রিফে সাড়া দিয়ে কথোপকথন শুরু করুন।"],["Responded ✓","সাড়া দেওয়া হয়েছে ✓"],["Respond to brief","ব্রিফে সাড়া দিন"],["Copy a gig line and paste it anywhere — Facebook, WhatsApp, or your own page.","গিগের লাইন কপি করে যেকোনো জায়গায় পেস্ট করুন — Facebook, WhatsApp বা নিজের পেজে।"],["You have no gigs yet. Post a gig first, then share it from here.","আপনার এখনো কোনো গিগ নেই। আগে গিগ পোস্ট করুন, তারপর এখান থেকে শেয়ার করুন।"],["Full name","পুরো নাম"],["Guest mode","গেস্ট মোড"],["Seller level","সেলার লেভেল"],["ID / NID","ID / NID"],["See full profile below","নিচে পুরো প্রোফাইল দেখুন"],["Pause a gig to hide it from the Gigs page, or activate it again any time.","গিগ বন্ধ রাখলে গিগ পেজ থেকে লুকিয়ে থাকবে, যেকোনো সময় আবার চালু করতে পারবেন।"],["No gigs yet.","এখনো কোনো গিগ নেই।"],["+ Post a new Gig","+ নতুন গিগ পোস্ট করুন"],["Let buyers know whether you can take new work right now.","বায়ারকে জানান আপনি এখন নতুন কাজ নিতে পারবেন কি না।"],["Available for work","কাজের জন্য উপলব্ধ"],["Buyers can order and message you.","বায়ার অর্ডার ও মেসেজ করতে পারবে।"],["Busy","ব্যস্ত"],["Your gigs stay visible; you reply when you can.","আপনার গিগ দেখা যাবে; সময় পেলে উত্তর দেবেন।"],["On vacation","ছুটিতে"],["You are away — buyers see you are unavailable.","আপনি বাইরে — বায়ার দেখবে আপনি উপলব্ধ নন।"],["Current","বর্তমান"],["Share your invite code with friends. When they join KAJZO with your code, you both get discovered faster by buyers.","বন্ধুদের সাথে আপনার আমন্ত্রণ কোড শেয়ার করুন। তারা আপনার কোড দিয়ে KAJZO-তে যোগ দিলে দুজনেই বায়ারের কাছে দ্রুত পৌঁছাবেন।"],["Your invite code","আপনার আমন্ত্রণ কোড"],["Copy invite code","আমন্ত্রণ কোড কপি করুন"],["Friends invited so far:","এখন পর্যন্ত আমন্ত্রিত বন্ধু:"],["Invite code copied","আমন্ত্রণ কোড কপি হয়েছে"],["Share invite","আমন্ত্রণ শেয়ার করুন"],["Copy invite message","আমন্ত্রণ বার্তা কপি করুন"],["Invite message copied — paste it anywhere","আমন্ত্রণ বার্তা কপি হয়েছে — যেকোনো জায়গায় পেস্ট করুন"],["Your friend signs in with Gmail, opens Profile → Invite friends and enters this code. The join is saved to Supabase and your friend appears in your list below.","আপনার বন্ধু Gmail দিয়ে সাইন ইন করে Profile → Invite friends খুলে এই কোডটি দেবে। যোগদান Supabase-এ সেভ হবে এবং আপনার বন্ধু নিচের তালিকায় দেখা যাবে।"],["Your invite code appears here as soon as your Google sign-in connects to the database.","আপনার Google সাইন ইন ডাটাবেসে যুক্ত হলেই আপনার আমন্ত্রণ কোড এখানে দেখা যাবে।"],["Joined with invite code:","আমন্ত্রণ কোড দিয়ে যোগ দিয়েছেন:"],["Have a friend's invite code?","বন্ধুর আমন্ত্রণ কোড আছে?"],["Enter the code and save it to your account — your friend will see you in their invite list.","কোডটি দিয়ে আপনার অ্যাকাউন্টে সেভ করুন — আপনার বন্ধু তার আমন্ত্রণ তালিকায় আপনাকে দেখতে পাবে।"],["Save invite code","আমন্ত্রণ কোড সেভ করুন"],["Invite code","আমন্ত্রণ কোড"],["Loading your invite list from the database…","ডাটাবেস থেকে আপনার আমন্ত্রণ তালিকা লোড হচ্ছে…"],["No one has joined with your code yet. Share your code — when a friend signs in and enters it, they appear here.","এখনো কেউ আপনার কোড দিয়ে যোগ দেয়নি। কোড শেয়ার করুন — বন্ধু সাইন ইন করে কোড দিলে এখানে দেখা যাবে।"],["Joined ✓","যোগ দিয়েছে ✓"],["Joined","যোগ দিয়েছে"],["Copy invite link","আমন্ত্রণ লিংক কপি করুন"],["Invite link copied — send it to a friend","আমন্ত্রণ লিংক কপি হয়েছে — বন্ধুকে পাঠান"],["Share invite sends your friend a link that opens KAJZO with your code already filled in — they just sign in with Gmail and the join is saved to your account. They can also type the code in Profile → Invite friends. When they join, they appear in your list below.","শেয়ার ইনভাইট চাপলে আপনার বন্ধু এমন একটি লিংক পাবে, যা আপনার কোড আগেই বসানো অবস্থায় KAJZO খুলবে — তারা শুধু Gmail দিয়ে সাইন ইন করলেই যোগদান আপনার অ্যাকাউন্টে সেভ হয়ে যাবে। তারা চাইলে Profile → Invite friends-এ গিয়ে কোডটিও লিখতে পারে। তারা যোগ দিলে নিচের তালিকায় দেখা যাবে।"],["Sign in with Google to see your invite list.","আপনার আমন্ত্রণ তালিকা দেখতে Google দিয়ে সাইন ইন করুন।"],["Language / ভাষা","ভাষা / Language"],["Prices are currently shown in","দাম এখন দেখানো হচ্ছে"],[". Change it from the currency picker at the top of the page."," মুদ্রায়। পেজের উপরের মুদ্রা বাছাই থেকে বদলান।"],["Message & order notifications","মেসেজ ও অর্ডারের নোটিফিকেশন"],["Low data mode","কম ডেটা মোড"],["Toggle low-data (lite) mode","কম ডেটা (লাইট) মোড চালু/বন্ধ করুন"],["Mode","মোড"],["Seller mode ON","সেলার মোড চালু"],["Buyer mode","বায়ার মোড"],["Community rule: be honest, deliver what your gig promises, and keep all communication inside KAJZO messages.","কমিউনিটির নিয়ম: সৎ থাকুন, গিগে যা প্রতিশ্রুতি দিয়েছেন তাই ডেলিভারি দিন, আর সব যোগাযোগ KAJZO মেসেজের ভিতরেই রাখুন।"],["Selling on KAJZO","KAJZO-তে বিক্রি"],
+        ["Ready-made replies you can reuse in chats and custom offers.","চ্যাট ও কাস্টম অফারে আবার ব্যবহার করা যায় এমন তৈরি উত্তর।"],["Copy template","টেমপ্লেট কপি করুন"],["Add a template","টেমপ্লেট যোগ করুন"],["Template name","টেমপ্লেটের নাম"],["Template text","টেমপ্লেটের লেখা"],["Save template","টেমপ্লেট সেভ করুন"],["Template saved","টেমপ্লেট সেভ হয়েছে"],["Template copied","টেমপ্লেট কপি হয়েছে"],["Buyers post briefs describing work they need. Respond to a brief to get the conversation started.","বায়ার তাদের দরকারি কাজের ব্রিফ পোস্ট করে। ব্রিফে সাড়া দিয়ে কথোপকথন শুরু করুন।"],["Responded ✓","সাড়া দেওয়া হয়েছে ✓"],["Respond to brief","ব্রিফে সাড়া দিন"],["Copy a gig line and paste it anywhere — Facebook, WhatsApp, or your own page.","গিগের লাইন কপি করে যেকোনো জায়গায় পেস্ট করুন — Facebook, WhatsApp বা নিজের পেজে।"],["You have no gigs yet. Post a gig first, then share it from here.","আপনার এখনো কোনো গিগ নেই। আগে গিগ পোস্ট করুন, তারপর এখান থেকে শেয়ার করুন।"],["Full name","পুরো নাম"],["Guest mode","গেস্ট মোড"],["Seller level","সেলার লেভেল"],["ID / NID","ID / NID"],["See full profile below","নিচে পুরো প্রোফাইল দেখুন"],["Pause a gig to hide it from the Gigs page, or activate it again any time.","গিগ বন্ধ রাখলে গিগ পেজ থেকে লুকিয়ে থাকবে, যেকোনো সময় আবার চালু করতে পারবেন।"],["No gigs yet.","এখনো কোনো গিগ নেই।"],["+ Post a new Gig","+ নতুন গিগ পোস্ট করুন"],["Let buyers know whether you can take new work right now.","বায়ারকে জানান আপনি এখন নতুন কাজ নিতে পারবেন কি না।"],["Available for work","কাজের জন্য উপলব্ধ"],["Buyers can order and message you.","বায়ার অর্ডার ও মেসেজ করতে পারবে।"],["Busy","ব্যস্ত"],["Your gigs stay visible; you reply when you can.","আপনার গিগ দেখা যাবে; সময় পেলে উত্তর দেবেন।"],["On vacation","ছুটিতে"],["You are away — buyers see you are unavailable.","আপনি বাইরে — বায়ার দেখবে আপনি উপলব্ধ নন।"],["Current","বর্তমান"],["Share your invite code with friends. When they join KAJZO with your code, you both get discovered faster by buyers.","বন্ধুদের সাথে আপনার আমন্ত্রণ কোড শেয়ার করুন। তারা আপনার কোড দিয়ে KAJZO-তে যোগ দিলে দুজনেই বায়ারের কাছে দ্রুত পৌঁছাবেন।"],["Your invite code","আপনার আমন্ত্রণ কোড"],["Copy invite code","আমন্ত্রণ কোড কপি করুন"],["Friends invited so far:","এখন পর্যন্ত আমন্ত্রিত বন্ধু:"],["Invite code copied","আমন্ত্রণ কোড কপি হয়েছে"],["Share invite","আমন্ত্রণ শেয়ার করুন"],["Copy invite message","আমন্ত্রণ বার্তা কপি করুন"],["Invite message copied — paste it anywhere","আমন্ত্রণ বার্তা কপি হয়েছে — যেকোনো জায়গায় পেস্ট করুন"],["Your friend signs in with Gmail, opens Profile → Invite friends and enters this code. The join is saved to Supabase and your friend appears in your list below.","আপনার বন্ধু Gmail দিয়ে সাইন ইন করে Profile → Invite friends খুলে এই কোডটি দেবে। যোগদান Supabase-এ সেভ হবে এবং আপনার বন্ধু নিচের তালিকায় দেখা যাবে।"],["Your invite code appears here as soon as your Google sign-in connects to the database.","আপনার Google সাইন ইন ডাটাবেসে যুক্ত হলেই আপনার আমন্ত্রণ কোড এখানে দেখা যাবে।"],["Joined with invite code:","আমন্ত্রণ কোড দিয়ে যোগ দিয়েছেন:"],["Have a friend's invite code?","বন্ধুর আমন্ত্রণ কোড আছে?"],["Enter the code and save it to your account — your friend will see you in their invite list.","কোডটি দিয়ে আপনার অ্যাকাউন্টে সেভ করুন — আপনার বন্ধু তার আমন্ত্রণ তালিকায় আপনাকে দেখতে পাবে।"],["Save invite code","আমন্ত্রণ কোড সেভ করুন"],["Invite code","আমন্ত্রণ কোড"],["Loading your invite list from the database…","ডাটাবেস থেকে আপনার আমন্ত্রণ তালিকা লোড হচ্ছে…"],["No one has joined with your code yet. Share your code — when a friend signs in and enters it, they appear here.","এখনো কেউ আপনার কোড দিয়ে যোগ দেয়নি। কোড শেয়ার করুন — বন্ধু সাইন ইন করে কোড দিলে এখানে দেখা যাবে।"],["Joined ✓","যোগ দিয়েছে ✓"],["Joined","যোগ দিয়েছে"],["Copy invite link","আমন্ত্রণ লিংক কপি করুন"],["Invite link copied — send it to a friend","আমন্ত্রণ লিংক কপি হয়েছে — বন্ধুকে পাঠান"],["Invite code received ✓ — sign in with Gmail and your join is saved automatically","ইনভাইট কোড পাওয়া গেছে ✓ — Gmail দিয়ে সাইন ইন করলেই আপনার যোগদান অটোমেটিক সেভ হয়ে যাবে"],["No internet connection — KAJZO needs internet to sign in. Please connect, then try again","ইন্টারনেট সংযোগ নেই — সাইন ইন করতে KAJZO-এর ইন্টারনেট লাগবে। সংযোগ দিয়ে আবার চেষ্টা করুন"],["Sign-in could not start — your browser blocked the Google tab. Please allow pop-ups for KAJZO, then try again","সাইন ইন শুরু করা যায়নি — আপনার ব্রাউজার Google ট্যাবটি আটকে দিয়েছে। KAJZO-এর জন্য পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন"],["Share invite sends your friend a link that opens KAJZO with your code already filled in — they just sign in with Gmail and the join is saved to your account. They can also type the code in Profile → Invite friends. When they join, they appear in your list below.","শেয়ার ইনভাইট চাপলে আপনার বন্ধু এমন একটি লিংক পাবে, যা আপনার কোড আগেই বসানো অবস্থায় KAJZO খুলবে — তারা শুধু Gmail দিয়ে সাইন ইন করলেই যোগদান আপনার অ্যাকাউন্টে সেভ হয়ে যাবে। তারা চাইলে Profile → Invite friends-এ গিয়ে কোডটিও লিখতে পারে। তারা যোগ দিলে নিচের তালিকায় দেখা যাবে।"],["Sign in with Google to see your invite list.","আপনার আমন্ত্রণ তালিকা দেখতে Google দিয়ে সাইন ইন করুন।"],["Language / ভাষা","ভাষা / Language"],["Prices are currently shown in","দাম এখন দেখানো হচ্ছে"],[". Change it from the currency picker at the top of the page."," মুদ্রায়। পেজের উপরের মুদ্রা বাছাই থেকে বদলান।"],["Message & order notifications","মেসেজ ও অর্ডারের নোটিফিকেশন"],["Low data mode","কম ডেটা মোড"],["Toggle low-data (lite) mode","কম ডেটা (লাইট) মোড চালু/বন্ধ করুন"],["Mode","মোড"],["Seller mode ON","সেলার মোড চালু"],["Buyer mode","বায়ার মোড"],["Community rule: be honest, deliver what your gig promises, and keep all communication inside KAJZO messages.","কমিউনিটির নিয়ম: সৎ থাকুন, গিগে যা প্রতিশ্রুতি দিয়েছেন তাই ডেলিভারি দিন, আর সব যোগাযোগ KAJZO মেসেজের ভিতরেই রাখুন।"],["Selling on KAJZO","KAJZO-তে বিক্রি"],
         ["Checked just now, from the live state of this app — nothing here is a guess:","এইমাত্র যাচাই করা হয়েছে, অ্যাপের লাইভ অবস্থা থেকে — এখানে কিছুই অনুমান নয়:"],["Database connection","ডাটাবেস সংযোগ"],["Sign-in","সাইন ইন"],["On this device","এই ডিভাইসে"],["Sign in with Google","Google দিয়ে সাইন ইন করুন"],["Checking the database connection right now — this takes a few seconds, and this row updates by itself when the answer arrives.","ডাটাবেস সংযোগ এখনই যাচাই হচ্ছে — কয়েক সেকেন্ড লাগবে, আর উত্তর এলেই এই সারি নিজে নিজে আপডেট হবে।"],["Database still not reachable — please check your connection and try again","ডাটাবেসে এখনো পৌঁছানো যাচ্ছে না — সংযোগ চেক করে আবার চেষ্টা করুন"],["Checking…","যাচাই হচ্ছে…"],["Gigs","গিগ"],["Active chats","সক্রিয় চ্যাট"],["Run check again","আবার যাচাই করুন"],["System check refreshed","সিস্টেম চেক আবার করা হয়েছে"],["Marketplace overview","মার্কেটপ্লেসের সারসংক্ষেপ"],["Gigs live","লাইভ গিগ"],["Orders in app","অ্যাপে অর্ডার"],["Open disputes","খোলা ডিসপিউট"],["Support tickets","সাপোর্ট টিকিট"],["Withdrawals requested","টাকা তোলার অনুরোধ"],["Unread notifications","অপঠিত নোটিফিকেশন"],["Database","ডাটাবেস"],["Review","যাচাই করুন"],["Your NID review","আপনার NID যাচাই"],["No gigs posted from this account yet.","এই অ্যাকাউন্ট থেকে এখনো কোনো গিগ পোস্ট হয়নি।"],["Total tickets","মোট টিকিট"],["Open / in review","খোলা / যাচাই চলছে"],["Connection","সংযোগ"],
         ["Support — Help line","সাপোর্ট — হেল্প লাইন"],["Write your problem or question here. Your message goes","আপনার সমস্যা বা প্রশ্ন এখানে লিখুন। আপনার মেসেজ সরাসরি"],["directly to the KAJZO support team","সরাসরি KAJZO সাপোর্ট দলের কাছে যায়"],["— they reply in this same thread.","— তারা এই একই থ্রেডে উত্তর দেয়।"],["Topic","বিষয়"],["Order problem","অর্ডার সমস্যা"],["Payment / withdrawal","পেমেন্ট / টাকা তোলা"],["Gig problem","গিগ সমস্যা"],["Account / login","অ্যাকাউন্ট / লগইন"],["Report a user","ব্যবহারকারীকে রিপোর্ট"],["Other question","অন্য প্রশ্ন"],["Related order (optional)","সম্পর্কিত অর্ডার (ঐচ্ছিক)"],["Your message","আপনার মেসেজ"],["Describe your problem clearly…","আপনার সমস্যাটি পরিষ্কার করে লিখুন…"],["Send to support team","সাপোর্ট দলের কাছে পাঠান"],["My support tickets","আমার সাপোর্ট টিকিট"],["No messages yet. Messages you send and the support replies will appear here.","এখনো কোনো মেসেজ নেই। আপনার পাঠানো মেসেজ ও সাপোর্টের উত্তর এখানে আসবে।"],["Add a reply","উত্তর যোগ করুন"],["Write more details for the support team…","সাপোর্ট দলের জন্য আরও বিস্তারিত লিখুন…"],["Send reply","উত্তর পাঠান"],["This ticket is resolved.","এই টিকিটের মীমাংসা হয়েছে।"],["Need more help? Send a new message below.","আরও সাহায্য লাগবে? নিচে নতুন মেসেজ পাঠান।"],["Please write a little more so the support team can help you.","সাপোর্ট দল যাতে সাহায্য করতে পারে, আরেকটু বিস্তারিত লিখুন।"],["Copied","কপি হয়েছে"],["Ticket sent — you will be notified when the support team replies","টিকিট পাঠানো হয়েছে — সাপোর্ট টিম উত্তর দিলে জানানো হবে"],["Ticket sent — waiting for the support team's reply. You will be notified here when they reply.","টিকিট পাঠানো হয়েছে — সাপোর্ট টিমের উত্তরের অপেক্ষায়। তারা উত্তর দিলে এখানেই জানানো হবে।"],
         ["Database: connecting…","ডাটাবেস: সংযোগ হচ্ছে…"],["Database: offline — local mode","ডাটাবেস: অফলাইন — লোকাল মোড"],["Database: live — saved permanently","ডাটাবেস: লাইভ — স্থায়ীভাবে সেভ হচ্ছে"],["Database: checking…","ডাটাবেস: যাচাই হচ্ছে…"],["Database: opening Google sign-in…","ডাটাবেস: Google সাইন ইন খুলছে…"],["Database: Google sign-in failed — use the form below","ডাটাবেস: Google সাইন ইন ব্যর্থ — নিচের ফর্মটি ব্যবহার করুন"],["Saved to favorites","পছন্দের তালিকায় সেভ হয়েছে"],["Removed from favorites","পছন্দের তালিকা থেকে সরানো হয়েছে"],["Signed out","সাইন আউট হয়েছে"],["Notifications ON","নোটিফিকেশন চালু"],["Notifications OFF","নোটিফিকেশন বন্ধ"],["Availability updated","উপলব্ধতা আপডেট হয়েছে"],["Your response was sent to the buyer","আপনার উত্তর বায়ারের কাছে পাঠানো হয়েছে"],["Gig paused — hidden from the Gigs page","গিগ বন্ধ — গিগ পেজ থেকে লুকানো হয়েছে"],["Gig is active again","গিগ আবার সক্রিয় হয়েছে"],["Seller mode ON — Selling tools are open","সেলার মোড চালু — বিক্রির টুল খুলে গেছে"],["Seller mode OFF — you are in Buyer mode","সেলার মোড বন্ধ — আপনি বায়ার মোডে আছেন"],["Delivery sent to the buyer","ডেলিভারি বায়ারের কাছে পাঠানো হয়েছে"],["Order completed — payment released","অর্ডার সম্পন্ন — পেমেন্ট ছেড়ে দেওয়া হয়েছে"],["Revision requested from the seller","সেলারের কাছে রিভিশন চাওয়া হয়েছে"],["Order cancelled — refund issued","অর্ডার বাতিল — রিফান্ড দেওয়া হয়েছে"],["Dispute submitted — KAJZO support is reviewing","ডিসপিউট জমা হয়েছে — KAJZO সাপোর্ট যাচাই করছে"],["Dispute withdrawn","ডিসপিউট তুলে নেওয়া হয়েছে"],["Custom cover image selected","নিজের কভার ছবি বেছে নেওয়া হয়েছে"],
@@ -6247,6 +6389,7 @@
            freshly rendered markup as well. */
         try {
           renderGigs(); renderChatList(); renderNotifications(); updateMsgCounts();
+          updateInviteBanner(); /* the invite bar builds its own text per language — rebuild it too */
           if (state.page === "profile" && user) renderProfile();
           if ($("menuScreen").classList.contains("open")) renderMenuPage();
         } catch(e){}
@@ -6305,6 +6448,21 @@
       updateMsgCounts();
       updateAuthUI();
       switchPage("gigs");
+      /* Invite banner wiring: its Sign in button runs the same Google
+         flow as "Continue with Gmail"; dismissing hides the bar for
+         this session — except for the inviter's OWN code, whose parked
+         copy is dropped too, since it can never be redeemed and must
+         not reappear on every load. */
+      var ibs = $("inviteBannerSignIn");
+      if (ibs) ibs.addEventListener("click", function(){ launchGoogleSignIn(); });
+      var ibc = $("inviteBannerClose");
+      if (ibc) ibc.addEventListener("click", function(){
+        if (sbUser && pendingInviteCode() && pendingInviteCode() === myInviteCode()) clearPendingInvite();
+        inviteBannerDismissed = true;
+        updateInviteBanner();
+      });
+      updateInviteBanner();
+      if (inviteFreshCapture) toast("Invite code received ✓ — sign in with Gmail and your join is saved automatically");
     })();
     </script>
   </body>
