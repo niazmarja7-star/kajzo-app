@@ -1256,6 +1256,53 @@
         david:   { name:"David Okafor", user:"@davidbuilds", level:"1", levelTxt:"Level 1 Seller", place:"Lagos, Nigeria", district:"Lagos", country:"Nigeria", since:"2023", lang:"English", resp:"within 2 hours", grad:"#ea580c", photo:null, about:"Shopify developer in Lagos. Complete online stores with payments, apps and training." }
       };
       function lvlClass(l){ return l==="top" ? "lvl-top" : l==="2" ? "lvl-2" : l==="1" ? "lvl-1" : "lvl-new"; }
+      /* ---------- Seller level: computed from REAL reviews & orders only ----------
+         A seller's badge is never a stored label. It is worked out live from
+         the seller's gigs: total real reviews, total orders and the average
+         rating across them (for the signed-in seller, completed orders from
+         the real orders table count too). No reviews at all always means
+         "New Seller" — no badge can appear without real reviews behind it,
+         and "Top Rated" needs many completed orders, many reviews and a
+         high average rating. */
+      function sellerStats(key){
+        var revs = 0, orders = 0, wsum = 0;
+        for (var i=0;i<GIGS.length;i++){
+          var g = GIGS[i];
+          if (g.seller !== key) continue;
+          var c = reviewCount(g);
+          revs += c;
+          orders += Number(g.orders) || 0;
+          if (c > 0) wsum += gigRating(g) * c;
+        }
+        if (key === "me"){
+          var done = 0;
+          for (var j=0;j<receivedOrders.length;j++) if (receivedOrders[j].status === "Completed") done++;
+          if (done > orders) orders = done;
+        }
+        return { reviews:revs, orders:orders, rating: revs ? wsum / revs : 0 };
+      }
+      function sellerLevelFor(key){
+        var st = sellerStats(key);
+        if (st.reviews <= 0) return { level:"new", txt:"New Seller" };
+        if (st.orders >= 40 && st.reviews >= 10 && st.rating >= 4.7) return { level:"top", txt:"Top Rated" };
+        if (st.orders >= 15 && st.reviews >= 3) return { level:"2", txt:"Level 2 Seller" };
+        if (st.orders >= 5) return { level:"1", txt:"Level 1 Seller" };
+        return { level:"new", txt:"New Seller" };
+      }
+      function sellerBadgeHTML(key){
+        var lv = sellerLevelFor(key);
+        return '<span class="lvl ' + lvlClass(lv.level) + '">' + lv.txt + '</span>';
+      }
+      /* Keep the stored SELLERS labels in sync with the computed truth, so
+         nothing anywhere (cards, detail page, gig sync metadata) can show
+         a badge the seller's real reviews and orders do not support. */
+      function refreshSellerLevels(){
+        for (var k in SELLERS){
+          var lv = sellerLevelFor(k);
+          SELLERS[k].level = lv.level;
+          SELLERS[k].levelTxt = lv.txt;
+        }
+      }
       function avatarHTML(s, cls){
         if (s.photo) return '<span class="avatar ' + (cls||"") + '"><img src="' + esc(s.photo) + '" alt="" /></span>';
         return '<span class="avatar ' + (cls||"") + '" style="background:' + s.grad + '">' + initials(s.name) + '</span>';
@@ -1331,7 +1378,7 @@
           title:"I will create a professional website for your business",
           tags:["website design","website","business website","web development","responsive website","professional website"],
           rating:0, reviews:0, orders:0, aiImage:false, aiSource:"", aiReported:false,
-          about:"I will create a modern, fast and mobile-friendly professional website for your business. Your website will look clean and trustworthy on phones, tablets and computers, load quickly, and make it easy for customers to contact you. Every website includes a clear home page, your services, contact form, WhatsApp button and Google Map, with basic SEO so customers can find you on Google. I am Abdullah Al-Marjan, a Top Rated seller from Bangladesh — message me before ordering and tell me about your business, and I will build the right website for it.",
+          about:"I will create a modern, fast and mobile-friendly professional website for your business. Your website will look clean and trustworthy on phones, tablets and computers, load quickly, and make it easy for customers to contact you. Every website includes a clear home page, your services, contact form, WhatsApp button and Google Map, with basic SEO so customers can find you on Google. I am Abdullah Al-Marjan, a website designer from Bangladesh — message me before ordering and tell me about your business, and I will build the right website for it.",
           pkgs:[
             pkg(50, 3, "2", "A clean, professional starter website for your business", ["1-page professional website","Mobile-friendly responsive design","Contact form & WhatsApp button","Basic SEO setup","2 revisions"]),
             pkg(120, 5, "3", "A complete multi-page business website — the popular choice", ["Up to 5 pages — Home, About, Services, Gallery, Contact","Mobile-friendly responsive design","Contact form, WhatsApp button & Google Map","On-page SEO setup","Social media links","3 revisions"]),
@@ -1850,7 +1897,7 @@
          country, work type) travel inside the description after a marker
          and are stripped again before the text is shown to anyone. */
       function sbEncodeDesc(g){
-        var meta = { cat:g.cat, tags:g.tags, pkgs:g.pkgs, district:g.district, country:g.country, workType:g.workType, paused:!!g.paused, aiImage:!!g.aiImage, aiSource:g.aiSource || "", sellerName:(SELLERS[g.seller] ? SELLERS[g.seller].name : ""), sellerLevel:(SELLERS[g.seller] ? SELLERS[g.seller].level : "new"), sellerLevelTxt:(SELLERS[g.seller] ? SELLERS[g.seller].levelTxt : "New Seller") };
+        var meta = { cat:g.cat, tags:g.tags, pkgs:g.pkgs, district:g.district, country:g.country, workType:g.workType, paused:!!g.paused, aiImage:!!g.aiImage, aiSource:g.aiSource || "", sellerName:(SELLERS[g.seller] ? SELLERS[g.seller].name : ""), sellerLevel:sellerLevelFor(g.seller).level, sellerLevelTxt:sellerLevelFor(g.seller).txt };
         return (g.about || "") + SB_META_MARK + JSON.stringify(meta);
       }
       function sbDecodeDesc(desc){
@@ -3273,7 +3320,6 @@
         if (activeChatId) renderChatMsgs();
         renderNotifications();
         updateMsgCounts();
-        var hc = $("heroGigCount"); if (hc) hc.textContent = GIGS.length + (LANG === "bn" ? "টি সার্ভিস" : " services");
         var fc = $("favCount"); if (fc){ var n = Object.keys(state.favs).length; fc.textContent = n ? "(" + n + ")" : ""; }
         var ft = $("favToggle"); if (ft) ft.classList.toggle("active", !!state.favOnly);
         var fh = $("favHeaderBtn"); if (fh){ fh.classList.toggle("active", !!state.favOnly); fh.setAttribute("aria-pressed", state.favOnly ? "true" : "false"); }
@@ -3474,7 +3520,7 @@
           '<div class="gig-body">' +
             '<div class="seller-row">' + avatarHTML(s) +
             '<span class="sname">' + esc(s.name) + '</span>' +
-            '<span class="lvl ' + lvlClass(s.level) + '">' + s.levelTxt + '</span></div>' +
+            sellerBadgeHTML(g.seller) + '</div>' +
             '<div style="display:flex; gap:.35rem; flex-wrap:wrap; margin-bottom:.45rem;"><span class="dist-badge">📍 ' + esc(gigLocation(g)) + '</span><span class="work-badge">' + workLabel(gigWorkType(g)) + '</span></div>' +
             '<h3 class="gig-title"><button type="button" data-open="' + g.id + '">' + esc(g.title) + '</button></h3>' +
             '<div class="rating-row">' + ratingInnerHTML(g, " orders") + '</div>' +
@@ -3493,6 +3539,7 @@
         var ft3 = $("favToggle"); if (ft3) ft3.setAttribute("aria-pressed", state.favOnly ? "true" : "false");
       }
       function renderGigs(){
+        refreshSellerLevels();
         var list = filteredGigs();
         var noGigsAtAll = GIGS.length === 0;
         $("gigGrid").innerHTML = list.map(function(g, i){ return gigCard(g, i); }).join("");
@@ -3551,8 +3598,6 @@
       $("topSearchForm").addEventListener("submit", function(e){ e.preventDefault(); doSearch(topSearchInput.value); });
       var headerSearchForm = $("headerSearchForm");
       if (headerSearchForm) headerSearchForm.addEventListener("submit", function(e){ e.preventDefault(); doSearch($("headerSearchInput").value); });
-      var heroForm = $("heroSearchForm");
-      if (heroForm) heroForm.addEventListener("submit", function(e){ e.preventDefault(); doSearch($("heroSearchInput").value); });
       var popBtns = document.querySelectorAll("[data-pop]");
       for (var pi=0; pi<popBtns.length; pi++) popBtns[pi].addEventListener("click", function(){ doSearch(this.getAttribute("data-pop")); });
       topSearchClear.addEventListener("click", function(){
@@ -3577,6 +3622,7 @@
         curGig = findGig(id); curPkg = 1;
         if (!curGig) return;
         var g = curGig, s = SELLERS[g.seller];
+        refreshSellerLevels();
         syncGigRating(g);
         var realRevs = realReviews(g);
         var revHtml = realRevs.map(function(r){
@@ -3600,7 +3646,7 @@
             '<h2>About this gig</h2><p class="about">' + esc(g.about) + '</p>' +
             '<div class="kw-chips">' + g.tags.map(function(t){ return '<span>#' + esc(t) + '</span>'; }).join("") + '</div>' +
             '<div class="seller-card">' + avatarHTML(s) + '<div>' +
-              '<h3>' + esc(s.name) + ' <span class="lvl ' + lvlClass(s.level) + '">' + s.levelTxt + '</span></h3>' +
+              '<h3>' + esc(s.name) + ' ' + sellerBadgeHTML(g.seller) + '</h3>' +
               '<p>' + esc(s.about) + '</p>' +
               '<div class="meta-chips"><span>📍 ' + esc(gigLocation(g)) + '</span><span>' + workLabel(gigWorkType(g)) + '</span><span>' + s.place + '</span><span>সদস্য ' + s.since + ' থেকে</span><span>' + s.lang + '</span><span>' + s.resp + '</span></div>' +
               '<p style="margin-top:.6rem;"><button class="btn btn-ghost" type="button" id="detailMsgBtn" style="padding:.45rem .9rem;">' + chatSVG + ' Message ' + esc(s.name.split(" ")[0]) + '</button></p>' +
@@ -3911,17 +3957,6 @@
       }
 
       /* ---------- chat / messenger ---------- */
-      var SELLER_REPLIES = [
-        "Thanks for reaching out! Tell me a bit more about your project and I will take care of it.",
-        "Yes, that is included. Everything listed in the package is covered.",
-        "Once you place the order I will start right away — delivery will be on time.",
-        "No worries — revisions included in your package are always free."
-      ];
-      var BUYER_REPLIES = [
-        "Sounds good, thank you! Please keep me updated here.",
-        "I have shared all the details in my order requirements.",
-        "Please take care with the work — an on-time delivery is all I need."
-      ];
       function nowTime(){
         try { return new Date().toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }); }
         catch(e){ var d = new Date(); return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); }
@@ -4120,32 +4155,16 @@
         /* Instant: the message shows in the chat the moment you send it — no refresh */
         renderChatMsgs(); renderChatList(); updateMsgCounts();
         broadcastLive("message", conv.id, { gigId: conv.gigId, sellerId: conv.sellerId, otherName: conv.otherName, otherRole: conv.otherRole, orderNo: conv.orderNo || null, sbPeerId: conv.sbPeerId || null, msg: { who:"me", text: msg.text, ts: msg.ts, t: msg.t, seen:false, img: msg.img || null, fileName: msg.fileName || null } });
-        /* Real Supabase thread: the other side is a person. Their reply
-           arrives through the messages table (realtime + poll) — the
-           canned reply pool below must never speak for them. */
-        var gg2 = findGig(conv.gigId);
-        var realThread = !!(conv.sbThread || conv.sbPeerId || (gg2 && (gg2.sbUserId || /^[0-9a-fA-F-]{36}$/.test(gg2.id))));
-        if (realThread) return;
-        setTimeout(function(){ conv.typing = true; if (activeChatId === conv.id) renderChatMsgs(); }, 400);
-        setTimeout(function(){
-          conv.typing = false;
-          var pool = conv.otherRole === "Seller" ? SELLER_REPLIES : BUYER_REPLIES;
-          var replyText = pool[conv.replyIdx % pool.length];
-          var ts2 = Date.now();
-          conv.msgs.forEach(function(mm){ if (mm.who === "me") mm.seen = true; });
-          conv.msgs.push({ who:"other", text: replyText, ts:ts2, t: fmtTime(ts2) });
-          conv.replyIdx++;
-          conv.updatedAt = ts2;
-          /* If this chat is not open, it becomes an unread message + a notification on top */
-          if (activeChatId !== conv.id || state.page !== "messages"){
-            conv.unread = (conv.unread || 0) + 1;
-            addNotification(conv, replyText, ts2);
-          }
-          sortConversations();
-          if (activeChatId === conv.id && state.page === "messages") renderChatMsgs();
-          else toast("New message from " + conv.otherName);
-          renderChatList(); renderNotifications(); updateMsgCounts();
-        }, 1400);
+        /* NO simulated replies — removed on purpose (A-to-Z fix). The
+           other side of every chat is a real person: their reply arrives
+           through the Supabase messages table (realtime + poll) or the
+           same-browser live sync, never from a canned reply pool. The old
+           build answered local-mode chats with invented "typing…" replies
+           written as if the seller/buyer had sent them — the same kind of
+           fake automation that was removed from Support. A message sent
+           while signed out or offline simply stays in this thread on this
+           device (and is queued by sbSaveMessage) until it can be saved
+           to the account for real. */
       }
       $("chatForm").addEventListener("submit", function(e){
         e.preventDefault();
@@ -5296,60 +5315,17 @@
         document.getElementById("gigH").scrollIntoView({ behavior:"smooth" });
       });
 
-      /* ---------- seed inbox: several people have already messaged ---------- */
+      /* ---------- inbox: real conversations only ---------- */
       function seedInbox(){
-        if (conversations.length) return;
-        var now = Date.now();
-        function M(who, text, minsAgo){
-          var ts = now - minsAgo * 60000;
-          return { who:who, text:text, ts:ts, t:fmtTime(ts) };
-        }
-        var seeds = [
-          { gigId:"g3", sellerId:"tania", otherName:"Tania Rahman", otherRole:"Seller", unread:2, msgs:[
-            M("other","Hi! Thanks for checking my video editing gig. What kind of video do you want to edit?", 185),
-            M("me","Hi Tania, I need a YouTube video edited with subtitles.", 180),
-            M("other","Perfect, I can do that. Please share the raw video link and I will start today.", 12),
-            M("other","I can deliver the first draft tomorrow — is that okay for you?", 6)
-          ]},
-          { gigId:"g5", sellerId:"sakib", otherName:"Sakib Ahmed", otherRole:"Seller", unread:1, msgs:[
-            M("other","Hello! I record voice overs in my own studio. Send me your script any time.", 95),
-            M("me","Thanks Sakib, my script is about 300 words for an ad.", 90),
-            M("other","Got it — 300 words is covered in the Basic package. I will record it in a warm, clear tone.", 34)
-          ]},
-          { gigId:"g9", sellerId:"rakib", otherName:"Rakib Hasan", otherRole:"Seller", unread:1, msgs:[
-            M("other","Hi there! Do you want a WooCommerce store or a simple business website?", 150),
-            M("other","I just finished a store like yours — I can share a demo if you want to see it.", 72)
-          ]},
-          { gigId:"g4", sellerId:"imran", otherName:"Imran Hossain", otherRole:"Seller", unread:0, msgs:[
-            M("other","Assalamu Alaikum! I can set up your Facebook ad campaign today.", 260),
-            M("me","Great, I will place the order this evening.", 240)
-          ]}
-        ];
-        seeds.forEach(function(s){
-          if (!findGig(s.gigId)) return;
-          var last = s.msgs[s.msgs.length - 1];
-          var conv = { id:"c" + (++chatSeq), gigId:s.gigId, sellerId:s.sellerId, otherName:s.otherName, otherRole:s.otherRole, orderNo:null, msgs:s.msgs, replyIdx:0, typing:false, unread:s.unread, updatedAt:last.ts };
-          conversations.push(conv);
-          /* Unread messages become notifications — they will be sorted newest first.
-             Note: slice(-0) returns the whole array, so a read conversation (unread 0)
-             must not go through the unread path — otherwise every message, plus the
-             last one again below, shows up and the same message appears twice. */
-          if (s.unread > 0){
-            var unreadMsgs = s.msgs.slice(-s.unread);
-            unreadMsgs.forEach(function(m){
-              notifications.push({ id:"n" + (++notifSeq), convId:conv.id, fromName:s.otherName, sellerId:s.sellerId, text:m.text, ts:m.ts, read:false });
-            });
-          } else {
-            /* Already-read conversation: show only its latest incoming message, once */
-            var lastOther = null;
-            for (var mi = s.msgs.length - 1; mi >= 0; mi--){ if (s.msgs[mi].who === "other"){ lastOther = s.msgs[mi]; break; } }
-            if (lastOther){
-              notifications.push({ id:"n" + (++notifSeq), convId:conv.id, fromName:s.otherName, sellerId:s.sellerId, text:lastOther.text, ts:lastOther.ts, read:true });
-            }
-          }
-        });
-        sortConversations();
-        sortNotifications();
+        /* NO demo inbox — removed on purpose (A-to-Z fix). This function
+           used to invent conversations (and unread notifications) from
+           demo sellers for gigs that are not in the marketplace, so a
+           brand-new account appeared to already have messages it never
+           received. The inbox now starts empty and is filled only by
+           real conversations: chats the user starts from a gig, and —
+           when signed in — the threads loaded back from the Supabase
+           messages table. The name is kept because the init sequence
+           still invokes it. */
       }
 
       /* ---------- notification & message icon wiring ---------- */
@@ -5743,8 +5719,6 @@
         $("langBn").addEventListener("click", function(){ setLang("bn"); });
         $("langEn").addEventListener("click", function(){ setLang("en"); });
         applyLanguage(LANG, true);
-        var fw = $("onboardFindWork"); if (fw) fw.addEventListener("click", openPostGig);
-        var hr = $("onboardHire"); if (hr) hr.addEventListener("click", function(){ switchPage("gigs"); document.getElementById("gigH").scrollIntoView({behavior:"smooth"}); toast("Pick a category or country — then message the seller"); });
         var cs = $("currSel"); if (cs){ cs.value = "USD"; CURRENCY = "USD"; }
       })();
 
