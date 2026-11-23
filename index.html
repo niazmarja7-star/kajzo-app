@@ -1122,6 +1122,67 @@
       </div>
     </div>
 
+    <!-- ======================= EDIT A GIG ======================= -->
+    <div class="screen" id="editScreen" role="dialog" aria-modal="true" aria-label="Edit gig">
+      <div class="screen-in" style="max-width:860px;">
+        <button class="back-btn" data-close="editScreen" id="egBackBtn" type="button">← Back to Manage Gigs</button>
+        <h1 style="font-size:1.5rem; margin:.2rem 0 .3rem;">Edit gig</h1>
+        <p style="color:var(--ink-2); margin:0 0 1.2rem; line-height:1.65;">Change anything below — title, category, packages and prices, description, keywords or the cover image — then tap Save changes. The update is saved to your gig in the database and shows on the Gigs page right away.</p>
+        <form class="form-card" id="editForm">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="egTitle">Gig title (Bangla or English)</label>
+              <input id="egTitle" required maxlength="90" placeholder="যেমন: আমি মাপমতো পোশাক সেলাই করব / I will design a logo" />
+            </div>
+            <div class="field">
+              <label for="egCat">Category</label>
+              <select id="egCat"></select>
+            </div>
+            <div class="field">
+              <label for="egDistrict">Your country / area — anywhere in the world</label>
+              <select id="egDistrict"></select>
+              <span class="hint">Buyers filter by country. Online gigs are shown worldwide automatically.</span>
+            </div>
+            <div class="field">
+              <label for="egWorkType">Work type</label>
+              <select id="egWorkType"><option value="online">💻 Online · Worldwide</option><option value="inperson">🏠 In person / Local</option><option value="both">🔀 Online + In person</option></select>
+            </div>
+            <div class="field">
+              <label for="egTags">Keywords (separate with commas)</label>
+              <input id="egTags" required maxlength="120" placeholder="টিউশন, গণিত, লোগো, মেরামত" />
+              <span class="hint">ক্রেতা এই শব্দ দিয়ে খুঁজলে আপনার গিগ আসবে।</span>
+            </div>
+            <div class="field full">
+              <label for="egDesc">Description</label>
+              <textarea id="egDesc" required maxlength="900" placeholder="What will the buyer get? How do you work? Why choose you?"></textarea>
+            </div>
+            <div class="field full">
+              <label>Cover image</label>
+              <span class="hint">Your current cover is shown below. Upload a new image only if you want to change it:</span>
+              <input type="file" id="egCoverFile" accept="image/*" />
+              <img id="egCoverPreview" alt="Your gig cover image preview" hidden style="width:100%; max-width:420px; aspect-ratio:3/2; object-fit:cover; border-radius:12px; margin-top:.6rem;" />
+              <div class="ai-check" id="egAiResult" hidden></div>
+            </div>
+            <div class="field full">
+              <label for="egAiSource">Cover image source</label>
+              <select id="egAiSource">
+                <option value="original">My own photo / design file — not AI</option>
+                <option value="ai">AI-generated (Midjourney, DALL·E, Firefly, etc.)</option>
+                <option value="unsure">Not sure</option>
+              </select>
+              <span class="hint">KAJZO checks every uploaded picture for AI-tool metadata. AI-made images are shown with an “AI-generated image” label on the gig, so buyers can tell them apart from real photos and original work.</span>
+            </div>
+          </div>
+          <h2 style="font-size:1.15rem; margin:1.4rem 0 .7rem;">Your three packages (prices in USD $ — buyers see them in their own currency)</h2>
+          <div id="egPkgs" style="display:grid; gap:1rem;"></div>
+          <div class="form-actions">
+            <button class="btn btn-green" type="submit" id="egSaveBtn" style="font-size:1.05rem; padding:.8rem 1.6rem;">Save changes</button>
+            <button class="btn btn-ghost" type="button" id="egCancelBtn">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- ======================= PROFILE MENU PAGES (Selling / Settings / Resources / Support) ======================= -->
     <div class="screen" id="menuScreen" role="dialog" aria-modal="true" aria-label="Profile menu page">
       <div class="screen-in" style="max-width:760px;">
@@ -2608,6 +2669,56 @@
            database: the new state is written back into its own row. */
         if (!sb || !sbUser || !g || !/^[0-9a-fA-F-]{36}$/.test(g.id)) return;
         sb.from("gigs").update({ description: sbEncodeDesc(g) }).eq("id", g.id).eq("user_id", sbUser.id).then(function(){}).catch(function(){});
+      }
+      function sbSaveGigEdit(g, coverFile, done){
+        /* Manage Gigs → Edit → Save: the FULL edit is written back to
+           the gig's own database row — title, price and cover_url are
+           real columns, and category / packages / keywords / country /
+           work type ride inside the description meta (sbEncodeDesc),
+           exactly as they were saved when the gig was posted. The
+           realtime UPDATE channel then pushes the new row to every
+           other device, and renderGigs() repaints this device at once.
+           A gig that is not a database row yet (posted signed-out or
+           offline) is updated in the on-device pending store instead
+           and inserted permanently by the usual pending-gig sync.
+           done(ok) is called exactly once. */
+        var finished = false;
+        function finish(ok){ if (finished) return; finished = true; if (done) done(!!ok); }
+        if (!g){ finish(false); return; }
+        if (sb && sbUser && /^[0-9a-fA-F-]{36}$/.test(g.id) && g.sbUserId){
+          function doUpdate(coverUrl){
+            var payload = { title: g.title, description: sbEncodeDesc(g), price: g.pkgs[0].price };
+            /* Cover: a fresh bucket URL wins; otherwise the gig's
+               current image (an https URL, a bundled asset, or the
+               resized data: copy — the same permanence rule sbPersistGig
+               uses, so the row always carries the seller's real cover). */
+            var cover = coverUrl || "";
+            if (!cover && g.img){
+              if (String(g.img).indexOf("data:") !== 0) cover = g.img;
+              else if (String(g.img).length <= 1500000) cover = g.img;
+            }
+            if (cover) payload.cover_url = cover;
+            sb.from("gigs").update(payload).eq("id", g.id).eq("user_id", sbUser.id).then(function(res){
+              finish(!(res && res.error));
+            }).catch(function(){ finish(false); });
+          }
+          if (coverFile){
+            sbUpload("gig-covers", coverFile, "covers").then(function(url){
+              if (url){ g.img = url; persistPendingGigs(); }
+              doUpdate(url);
+            }).catch(function(){ doUpdate(null); });
+          } else doUpdate(null);
+          return;
+        }
+        /* Not a database row yet: keep the edited copy in the pending
+           store (replacing the older snapshot of the same gig) and let
+           the pending sync insert it permanently on sign-in. */
+        var list = loadPendingGigs();
+        var found = false;
+        for (var i=0;i<list.length;i++) if (list[i].id === g.id){ list[i] = g; found = true; }
+        if (!found) trackPendingGig(g); else persistPendingGigs();
+        if (sb && sbUser) sbPersistGig(g, coverFile);
+        finish(true);
       }
       function sbSaveSupportTicket(t){
         if (!sb || !sbUser || !t) return;
@@ -5270,10 +5381,11 @@
             '</table></div>' +
             '<div class="form-actions"><button class="btn btn-gold" type="button" id="mpGoPost">+ Post a Gig</button><button class="btn btn-ghost" type="button" id="mpGoDetails">See full profile below</button></div>';
         } else if (k === "manage"){
-          h = '<h1 style="font-size:1.45rem; margin:.2rem 0 .4rem;">Manage Gigs</h1><p style="color:var(--ink-2); margin:0 0 1rem; line-height:1.6;">Pause a gig to hide it from the Gigs page, or activate it again any time.</p>' +
+          h = '<h1 style="font-size:1.45rem; margin:.2rem 0 .4rem;">Manage Gigs</h1><p style="color:var(--ink-2); margin:0 0 1rem; line-height:1.6;">Edit a gig to change its title, price, description or cover image. Pause a gig to hide it from the Gigs page, or activate it again any time.</p>' +
             (myGigs2.length ? myGigs2.map(function(g){
               return '<div class="order-row"><img src="' + esc(g.img) + '" alt="" /><div class="grow"><b class="t">' + esc(g.title) + '</b><span style="color:var(--ink-3); font-size:.9rem;">' + catName(g.cat) + ' · ' + g.orders + ' orders · ' + (g.paused ? "Paused" : "Active") + '</span></div>' +
               '<span class="status-pill ' + (g.paused ? "st-cancelled" : "st-completed") + '">' + (g.paused ? "Paused" : "Active") + '</span>' +
+              '<button class="btn btn-green" type="button" data-editgig="' + g.id + '" style="padding:.5rem .95rem;">Edit</button>' +
               '<button class="btn btn-ghost" type="button" data-pause="' + g.id + '" style="padding:.5rem .95rem;">' + (g.paused ? "Activate" : "Pause") + '</button></div>';
             }).join("") : '<div class="empty"><p>No gigs yet.</p></div>') +
             '<div class="form-actions"><button class="btn btn-gold" type="button" id="mpGoPost2">+ Post a new Gig</button></div>';
@@ -5345,7 +5457,7 @@
             checkRow("Support", true, "—", supportTickets.length + " support ticket(s). Messages you send from Support go to the KAJZO support team, and their replies return to the same thread. Tickets save to the database when signed in, so the thread is still here after log out / log in, on any device.") +
             checkRow("Notifications", true, "—", notifications.length + " notification(s), " + notifications.filter(function(x){ return !x.read; }).length + " unread — newest first, saved to the database when signed in.") +
             checkRow("Profile options", sbUser ? true : false, "Sign in needed", sbUser
-              ? "Every option on the Profile page is active on your account: Earnings and withdrawals, custom offer templates, Share Gigs, Manage Gigs (pause / activate writes back to the gig's database row), Availability, Preferences (language, currency, notifications, low-data), Account phone and Support all save to Supabase and load back on any device."
+              ? "Every option on the Profile page is active on your account: Earnings and withdrawals, custom offer templates, Share Gigs, Manage Gigs (edit / pause / activate writes back to the gig's database row), Availability, Preferences (language, currency, notifications, low-data), Account phone and Support all save to Supabase and load back on any device."
               : "Sign in with Google and every Profile option — Earnings, templates, Share Gigs, Manage Gigs, Availability, Preferences, Account and Support — saves permanently to your account in the database. Until then the options work on this device and sync themselves when you sign in.") +
             '</div>' +
             '<div class="form-actions"><button class="btn btn-green" type="button" id="mpRecheck">Run check again</button>' +
@@ -5516,6 +5628,10 @@
           else { setPausedId(g.id, g.paused); sbSaveProfileSettings(); } /* a local gig: the state rides the synced profile settings */
           toast(g.paused ? "Gig paused — hidden from the Gigs page" : "Gig is active again");
           renderGigs(); renderMenuPage();
+        });
+        var eds = body.querySelectorAll("[data-editgig]");
+        for (var ed=0;ed<eds.length;ed++) eds[ed].addEventListener("click", function(){
+          openEditGig(this.getAttribute("data-editgig"));
         });
         var avs = body.querySelectorAll("[data-avail]");
         for (var a=0;a<avs.length;a++) avs[a].addEventListener("click", function(){
@@ -6015,6 +6131,132 @@
         document.getElementById("gigH").scrollIntoView({ behavior:"smooth" });
       });
 
+      /* ---------- edit a gig (Manage Gigs → Edit) ---------- */
+      var editingGigId = null;   /* the gig open in the edit form */
+      var egCoverData = null;    /* the cover the form will save: the gig's current image, or the newly picked resized copy */
+      var egCoverFileObj = null; /* a newly picked cover File, uploaded to the gig-covers bucket on save */
+      var egAiDetected = null;   /* AI tool name found in a newly picked cover file, or null */
+      function openEditGig(id){
+        var g = findGig(id);
+        if (!g) return;
+        if (!isMyGig(g)){ toast("You can only edit your own gigs"); return; }
+        editingGigId = g.id;
+        egCoverData = g.img || null;
+        egCoverFileObj = null;
+        egAiDetected = null;
+        /* Prefill EVERY field from the gig as it exists right now:
+           title, category, country / area, work type, keywords,
+           description, the cover image and all three packages. */
+        $("egTitle").value = g.title || "";
+        $("egCat").innerHTML = CATS.map(function(c){ return '<option value="' + c.id + '">' + c.name + '</option>'; }).join("");
+        $("egCat").value = g.cat || "programming";
+        var egd = $("egDistrict");
+        egd.innerHTML = COUNTRIES.concat(DISTRICTS).map(function(d){ return '<option value="' + d + '">' + d + '</option>'; }).join("");
+        var area = (g.country && COUNTRIES.indexOf(g.country) !== -1 && g.country !== "Bangladesh") ? g.country : (g.district || g.country || "Bangladesh");
+        egd.value = area;
+        if (egd.value !== area) egd.value = "Bangladesh";
+        $("egWorkType").value = gigWorkType(g);
+        $("egTags").value = (g.tags || []).join(", ");
+        $("egDesc").value = g.about || "";
+        var aiSel = $("egAiSource"); if (aiSel) aiSel.value = g.aiImage ? "ai" : "original";
+        var aiRes = $("egAiResult"); if (aiRes){ aiRes.hidden = true; aiRes.innerHTML = ""; aiRes.classList.remove("found"); }
+        var cf = $("egCoverFile"); if (cf) cf.value = "";
+        var pv = $("egCoverPreview");
+        if (pv){ if (g.img){ pv.src = g.img; pv.hidden = false; } else { pv.hidden = true; pv.removeAttribute("src"); } }
+        $("egPkgs").innerHTML = g.pkgs.map(function(p, i){
+          return '<fieldset style="border:1px solid var(--line); border-radius:14px; padding:1rem; margin:0; background:var(--surface-2);"><legend style="font-weight:800; padding:0 .5rem;">' + PKG_NAMES[i] + ' package</legend>' +
+          '<div class="form-grid">' +
+          '<div class="field"><label>Price ($)</label><input type="number" min="5" step="1" required id="egp' + i + '" value="' + p.price + '" /></div>' +
+          '<div class="field"><label>Delivery (days)</label><input type="number" min="1" max="60" required id="egd' + i + '" value="' + p.days + '" /></div>' +
+          '<div class="field"><label>Revisions</label><input required id="egr' + i + '" value="' + esc(p.rev) + '" /></div>' +
+          '<div class="field"><label>Short description</label><input required maxlength="60" id="egdesc' + i + '" value="' + esc(p.desc) + '" /></div>' +
+          '<div class="field full"><label>What is included (separate with commas)</label><input required id="egf' + i + '" value="' + esc((p.feats || []).join(", ")) + '" /></div>' +
+          '</div></fieldset>';
+        }).join("");
+        var sb2 = $("egSaveBtn"); if (sb2){ sb2.disabled = false; sb2.textContent = "Save changes"; }
+        closeScreen("menuScreen");
+        openScreen("editScreen");
+      }
+      function backToManageGigs(){
+        closeScreen("editScreen");
+        openMenuPage("manage");
+      }
+      $("egCancelBtn").addEventListener("click", backToManageGigs);
+      $("egBackBtn").addEventListener("click", function(){ openMenuPage("manage"); });
+      $("egCoverFile").addEventListener("change", function(){
+        var f = this.files && this.files[0]; if (!f) return;
+        egCoverFileObj = f;
+        resizeCoverFile(f, function(dataUrl){
+          if (!dataUrl) return;
+          egCoverData = dataUrl;
+          var pv = $("egCoverPreview");
+          if (pv){ pv.src = dataUrl; pv.hidden = false; }
+          toast("Custom cover image selected");
+        });
+        /* Same AI check as the post form, on the newly picked file */
+        checkImageFileAI(f, function(marker){
+          egAiDetected = marker;
+          var box = $("egAiResult"); if (!box) return;
+          box.hidden = false;
+          if (marker){
+            box.classList.add("found");
+            box.innerHTML = "<b>AI check: AI-generated image detected.</b> This file carries a mark from <b>" + esc(marker) + "</b>. Your gig will show the “AI-generated image” label.";
+            $("egAiSource").value = "ai";
+          } else {
+            box.classList.remove("found");
+            box.innerHTML = "<b>AI check: no AI-tool mark found</b> in this file's metadata or name. If you made this picture with AI, set “Cover image source” to AI-generated below — KAJZO labels AI images on every gig.";
+          }
+        });
+      });
+      $("editForm").addEventListener("submit", function(e){
+        e.preventDefault();
+        var g = editingGigId ? findGig(editingGigId) : null;
+        if (!g){ backToManageGigs(); return; }
+        var pkgs = [];
+        for (var i=0;i<3;i++){
+          pkgs.push(pkg(
+            Math.max(5, +$("egp" + i).value || 5),
+            Math.max(1, +$("egd" + i).value || 1),
+            $("egr" + i).value.trim() || "1",
+            $("egdesc" + i).value.trim(),
+            $("egf" + i).value.split(",").map(function(x){ return x.trim(); }).filter(Boolean)
+          ));
+        }
+        var coverChanged = !!egCoverFileObj;
+        var aiDeclared = $("egAiSource").value === "ai";
+        var isAi = coverChanged ? (aiDeclared || !!egAiDetected) : (aiDeclared || !!g.aiImage);
+        var aiSrc = coverChanged
+          ? (egAiDetected ? "detected in the uploaded file (" + egAiDetected + ")" : aiDeclared ? "declared by the seller" : "")
+          : (g.aiSource || (aiDeclared ? "declared by the seller" : ""));
+        /* Apply the edit to the in-memory gig FIRST, so this device's
+           Gigs page, gig detail and Manage Gigs list all show the new
+           values the moment Save finishes — then persist. */
+        g.title = $("egTitle").value.trim();
+        g.cat = $("egCat").value;
+        g.district = $("egDistrict").value;
+        g.country = COUNTRIES.indexOf($("egDistrict").value) !== -1 ? $("egDistrict").value : "Bangladesh";
+        g.workType = $("egWorkType").value;
+        g.tags = $("egTags").value.split(",").map(function(x){ return x.trim().toLowerCase(); }).filter(Boolean);
+        g.about = $("egDesc").value.trim();
+        g.pkgs = pkgs;
+        if (egCoverData) g.img = egCoverData;
+        g.aiImage = isAi;
+        g.aiSource = isAi ? aiSrc : "";
+        var saveBtn = $("egSaveBtn");
+        if (saveBtn){ saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+        sbSaveGigEdit(g, egCoverFileObj, function(ok){
+          if (saveBtn){ saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
+          editingGigId = null; egCoverFileObj = null; egCoverData = null; egAiDetected = null;
+          renderGigs(); /* the Gigs page shows the edit immediately */
+          if (state.page === "profile" && user) renderProfile();
+          closeScreen("editScreen");
+          openMenuPage("manage"); /* back on Manage Gigs, with the updated row in place */
+          toast(ok
+            ? (sbUser ? "Gig updated ✓ — saved to the database, live on the Gigs page" : "Gig updated ✓ — live on the Gigs page; sign in with Gmail and it also saves permanently in the database")
+            : "Gig updated on this device — the database save did not go through, check your connection and edit again");
+        });
+      });
+
       /* ---------- inbox: real conversations only ---------- */
       function seedInbox(){
         /* NO demo inbox — removed on purpose (A-to-Z fix). This function
@@ -6204,9 +6446,9 @@
         ["← Back","← ফিরে যান"],["← All gigs","← সব গিগ"],["← Back to gig","← গিগে ফিরে যান"],["← Back to Profile","← প্রোফাইলে ফিরে যান"],["Checkout","চেকআউট"],["Package & extras","প্যাকেজ ও এক্সট্রা"],["Requirements","প্রয়োজনীয় তথ্য"],["Payment","পেমেন্ট"],["Order details","অর্ডারের বিবরণ"],["Choose a package","প্যাকেজ বেছে নিন"],["Add extras (optional)","এক্সট্রা যোগ করুন (ঐচ্ছিক)"],["Package","প্যাকেজ"],["Extras","এক্সট্রা"],["Service fee","সার্ভিস ফি"],["Total","মোট"],["Continue →","এগিয়ে যান →"],["Continue to payment →","পেমেন্টে এগিয়ে যান →"],["Your name","আপনার নাম"],["Email","ইমেইল"],["Project requirements — everything the seller needs to know","প্রজেক্টের প্রয়োজনীয় তথ্য — সেলারের যা যা জানা দরকার"],["The clearer you write, the better the delivery. Mention links, colors, sizes — everything.","যত পরিষ্কার করে লিখবেন, ডেলিভারি তত ভালো হবে। লিংক, রং, সাইজ — সবকিছু উল্লেখ করুন।"],["Payment method","পেমেন্টের মাধ্যম"],["Credit / Debit Card","ক্রেডিট / ডেবিট কার্ড"],["Pay instantly with Visa, Mastercard or Amex","Visa, Mastercard বা Amex দিয়ে সাথে সাথে পেমেন্ট করুন"],["You will confirm with your PayPal account","আপনার PayPal অ্যাকাউন্ট দিয়ে নিশ্চিত করবেন"],["Card number","কার্ড নম্বর"],["Name on card","কার্ডে থাকা নাম"],["Expiry","মেয়াদ"],["Your wallet number","আপনার ওয়ালেট নম্বর"],["Transaction ID","ট্রান্সাকশন আইডি"],["Processing payment…","পেমেন্ট প্রক্রিয়াধীন…"],["Submitting order…","অর্ডার জমা হচ্ছে…"],["Payment successful — order placed!","পেমেন্ট সফল — অর্ডার হয়ে গেছে!"],["Order submitted — payment pending verification","অর্ডার জমা হয়েছে — পেমেন্ট যাচাই বাকি"],["Payment pending verification","পেমেন্ট যাচাই বাকি"],["Payment rejected","পেমেন্ট বাতিল হয়েছে"],["Payment not verified","পেমেন্ট যাচাই হয়নি"],["Real payment — real money.","আসল পেমেন্ট — আসল টাকা।"],["bKash / Nagad payment on KAJZO is real: you must actually send the money from your own bKash / Nagad account. Your order is submitted as “Payment pending verification” and only becomes active after your TrxID is checked and the payment is confirmed.","KAJZO-তে বিকাশ / নগদ পেমেন্ট আসল: আপনার নিজের বিকাশ / নগদ অ্যাকাউন্ট থেকে সত্যিই টাকা পাঠাতে হবে। আপনার অর্ডার “পেমেন্ট যাচাই বাকি” হিসেবে জমা হবে এবং সেলার / অ্যাডমিন আপনার TrxID যাচাই করে পেমেন্ট নিশ্চিত করলেই কেবল সক্রিয় হবে।"],["Demo checkout — no real money is charged for card payments in this version.","ডেমো চেকআউট — এই সংস্করণে কার্ড পেমেন্টে আসল টাকা কাটা হয় না।"],["Demo checkout — no real money is charged for PayPal payments in this version.","ডেমো চেকআউট — এই সংস্করণে PayPal পেমেন্টে আসল টাকা কাটা হয় না।"],["Demo only — Rocket checkout in this version does not move real money.","শুধু ডেমো — এই সংস্করণে রকেট চেকআউটে আসল টাকা লেনদেন হয় না।"],["bKash and Nagad are real payments: you send the money yourself to the KAJZO number shown, and the order starts only after your TrxID is verified. Card, PayPal and Rocket are demo options in this version — no real money is charged for them. Once an order is active, payment is held until the work is delivered, and the seller is paid when you accept your order.","বিকাশ ও নগদ আসল পেমেন্ট: দেখানো KAJZO নম্বরে নিজে টাকা পাঠান, আর আপনার TrxID যাচাই হলেই অর্ডার শুরু হয়। কার্ড, PayPal ও রকেট এই সংস্করণে ডেমো অপশন — এগুলোতে আসল টাকা কাটা হয় না। অর্ডার সক্রিয় হলে কাজ ডেলিভারি না হওয়া পর্যন্ত পেমেন্ট ধরে রাখা হয়, আর ডেলিভারি গ্রহণ করলে সেলার পেমেন্ট পান।"],["Real payment — Send Money to the KAJZO bKash number, then enter your TrxID","আসল পেমেন্ট — KAJZO বিকাশ নম্বরে Send Money করুন, তারপর আপনার TrxID দিন"],["Real payment — Send Money to the KAJZO Nagad number, then enter your TrxID","আসল পেমেন্ট — KAJZO নগদ নম্বরে Send Money করুন, তারপর আপনার TrxID দিন"],["Submit order — payment pending verification","অর্ডার জমা দিন — পেমেন্ট যাচাই বাকি"],["Confirm payment — start order","পেমেন্ট নিশ্চিত করুন — অর্ডার শুরু করুন"],["Confirm payment","পেমেন্ট নিশ্চিত করুন"],["Reject payment","পেমেন্ট বাতিল করুন"],["Reject","বাতিল করুন"],["Payment number copied","পেমেন্ট নম্বর কপি হয়েছে"],["Verify this payment","এই পেমেন্ট যাচাই করুন"],["Payment confirmed — order is active","পেমেন্ট নিশ্চিত — অর্ডার সক্রিয় হয়েছে"],["Transaction ID (TrxID)","ট্রান্সাকশন আইডি (TrxID)"],["Sent from","যে নম্বর থেকে পাঠানো হয়েছে"],["Sent to (KAJZO)","প্রাপক নম্বর (KAJZO)"],["Payment status","পেমেন্টের অবস্থা"],["Pending verification","যাচাই বাকি"],["Send Money","Send Money (টাকা পাঠান)"],["Cancel order","অর্ডার বাতিল করুন"],["View my orders","আমার অর্ডার দেখুন"],["Back to gigs","গিগে ফিরে যান"],["Express delivery","এক্সপ্রেস ডেলিভারি"],["Delivered in half the normal time","সাধারণ সময়ের অর্ধেকে ডেলিভারি"],["Extra 2 revisions","অতিরিক্ত ২টি রিভিশন"],["Two more rounds of changes beyond the package","প্যাকেজের বাইরে আরও দুই দফা পরিবর্তন"],["7-day priority support","৭ দিনের অগ্রাধিকার সাপোর্ট"],["Fast help with questions for 7 days after delivery","ডেলিভারির পর ৭ দিন প্রশ্নে দ্রুত সাহায্য"],
         ["Resolution Center — dispute open","রেজোলিউশন সেন্টার — ডিসপিউট খোলা আছে"],["Withdraw dispute","ডিসপিউট তুলে নিন"],["Waiting for the support decision — you will be notified here.","সাপোর্টের সিদ্ধান্তের অপেক্ষায় — এখানেই জানিয়ে দেওয়া হবে।"],["Deliver the revised work","সংশোধিত কাজ ডেলিভারি দিন"],["Deliver this order","এই অর্ডার ডেলিভারি দিন"],["Delivery message","ডেলিভারি মেসেজ"],["Delivery file name","ডেলিভারি ফাইলের নাম"],["Send delivery","ডেলিভারি পাঠান"],["Review the delivery","ডেলিভারি যাচাই করুন"],["Accept & release payment","গ্রহণ করুন ও পেমেন্ট ছেড়ে দিন"],["Request revision","রিভিশন চান"],["Open dispute","ডিসপিউট খুলুন"],["Order actions","অর্ডারের কাজ"],["Cancel order & refund","অর্ডার বাতিল ও রিফান্ড"],["Delivered — waiting for the buyer","ডেলিভারি হয়েছে — বায়ারের অপেক্ষায়"],["Order completed ✓","অর্ডার সম্পন্ন ✓"],["Order cancelled","অর্ডার বাতিল হয়েছে"],["Revision requested","রিভিশন চাওয়া হয়েছে"],["Delivery","ডেলিভারি"],["Live order tracking","লাইভ অর্ডার ট্র্যাকিং"],["Ordered on","অর্ডারের তারিখ"],["Delivery due","ডেলিভারির শেষ তারিখ"],["Paid with","যা দিয়ে পেমেন্ট হয়েছে"],["Package price","প্যাকেজের দাম"],["You earn (95%)","আপনার আয় (৯৫%)"],["Revisions left","বাকি রিভিশন"],["Order timeline","অর্ডারের টাইমলাইন"],["Dispute reason","ডিসপিউটের কারণ"],["Work not delivered","কাজ ডেলিভারি হয়নি"],["Delivered work does not match the gig","ডেলিভারি করা কাজ গিগের সাথে মেলে না"],["Seller is not responding","সেলার সাড়া দিচ্ছেন না"],["Quality is not acceptable","মান গ্রহণযোগ্য নয়"],["Other problem","অন্য সমস্যা"],["Explain the problem","সমস্যাটি বুঝিয়ে লিখুন"],["What happened, and what outcome do you want?","কী হয়েছে, আর আপনি কী সমাধান চান?"],["Submit dispute to KAJZO support","KAJZO সাপোর্টে ডিসপিউট পাঠান"],["What should the seller change?","সেলার কী পরিবর্তন করবেন?"],["Describe the changes clearly…","পরিবর্তনগুলো পরিষ্কার করে লিখুন…"],["What you delivered, how to use it, anything the buyer should know…","কী ডেলিভারি দিলেন, কীভাবে ব্যবহার করবেন, বায়ারের যা জানা দরকার…"],["Manage","পরিচালনা করুন"],["Rate this gig","এই গিগকে রেটিং দিন"],["Submit review","রিভিউ জমা দিন"],["Your review","আপনার রিভিউ"],["Your rating","আপনার রেটিং"],["Your review (optional)","আপনার রিভিউ (ঐচ্ছিক)"],["How was the work? Would you order again?","কাজ কেমন হয়েছে? আবার অর্ডার করবেন তো?"],["Please tap the stars to choose your rating first","আগে তারা চেপে আপনার রেটিং বেছে নিন"],["Saved in the reviews database — this gig's rating is the average of real buyer reviews like yours.","রিভিউ ডাটাবেসে সেভ হয়েছে — এই গিগের রেটিং আপনার মতো আসল বায়ারদের রিভিউয়ের গড়।"],["Your rating becomes part of this gig's public rating — the average of real buyer reviews only.","আপনার রেটিং এই গিগের পাবলিক রেটিংয়ের অংশ হবে — শুধু আসল বায়ারদের রিভিউয়ের গড়।"],["Thanks! Your review is live — this gig's rating now includes it","ধন্যবাদ! আপনার রিভিউ লাইভ হয়েছে — এই গিগের রেটিংয়ে এখন এটাও যোগ হয়েছে"],
         ["Post a gig — sell to the whole world","গিগ পোস্ট করুন — সারা বিশ্বে বিক্রি করুন"],["Write in Bangla or English — buyers from countries around the world will see your gig. Add a clear title, description, your country and work type, plus three packages — Basic, Standard, Premium. Prices are set in USD ($) and shown to each buyer in their own currency.","বাংলা বা ইংরেজিতে লিখুন — সারা বিশ্বের বায়ার আপনার গিগ দেখবে। পরিষ্কার শিরোনাম, বিবরণ, আপনার দেশ ও কাজের ধরন দিন, সাথে তিনটি প্যাকেজ — Basic, Standard, Premium। দাম USD ($)-তে বসে, প্রতিটি বায়ার নিজের মুদ্রায় দেখে।"],["Gig title (Bangla or English)","গিগের শিরোনাম (বাংলা বা ইংরেজি)"],["Category","ক্যাটাগরি"],["Your country / area — anywhere in the world","আপনার দেশ / এলাকা — বিশ্বের যেকোনো জায়গা"],["Buyers filter by country. Online gigs are shown worldwide automatically.","বায়ার দেশ দিয়ে ফিল্টার করে। অনলাইন গিগ নিজে নিজেই বিশ্বজুড়ে দেখানো হয়।"],["Keywords (separate with commas)","কীওয়ার্ড (কমা দিয়ে আলাদা করুন)"],["Description","বিবরণ"],["What will the buyer get? How do you work? Why choose you?","বায়ার কী পাবেন? আপনি কীভাবে কাজ করেন? আপনাকে কেন বেছে নেবেন?"],["Upload your own cover image:","নিজের কভার ছবি আপলোড করুন:"],["Please upload your own cover image to publish the gig","গিগ প্রকাশ করতে নিজের কভার ছবি আপলোড করুন"],["Copy this text","এই লেখাটি কপি করুন"],["Automatic copy was blocked by the browser. The text is selected — long-press it (or press Ctrl+C) and choose Copy.","ব্রাউজার অটোমেটিক কপি আটকে দিয়েছে। লেখাটি সিলেক্ট করা আছে — চেপে ধরে (বা Ctrl+C চেপে) Copy বেছে নিন।"],["Cover image source","কভার ছবির উৎস"],["My own photo / design file — not AI","আমার নিজের ছবি / ডিজাইন ফাইল — AI নয়"],["AI-generated (Midjourney, DALL·E, Firefly, etc.)","AI দিয়ে তৈরি (Midjourney, DALL·E, Firefly ইত্যাদি)"],["Not sure","নিশ্চিত নই"],["KAJZO checks every uploaded picture for AI-tool metadata. AI-made images are shown with an “AI-generated image” label on the gig, so buyers can tell them apart from real photos and original work.","KAJZO প্রতিটি আপলোড করা ছবি AI-টুলের মেটাডেটার জন্য যাচাই করে। AI দিয়ে তৈরি ছবি গিগে “AI দিয়ে তৈরি ছবি” লেবেলসহ দেখানো হয়, যাতে বায়ার আসল ছবি ও নিজের কাজ থেকে আলাদা করে চিনতে পারে।"],["Your three packages (prices in USD $ — buyers see them in their own currency)","আপনার তিনটি প্যাকেজ (দাম USD $-তে — বায়ার নিজের মুদ্রায় দেখে)"],["Publish gig","গিগ প্রকাশ করুন"],["Price ($)","দাম ($)"],["Delivery (days)","ডেলিভারি (দিন)"],["Revisions","রিভিশন"],["Short description","সংক্ষিপ্ত বিবরণ"],["What is included (separate with commas)","যা যা থাকছে (কমা দিয়ে আলাদা করুন)"],["The essentials","প্রয়োজনীয় সবকিছু"],["More value included","আরও বেশি সুবিধা"],["The complete premium package","সম্পূর্ণ প্রিমিয়াম প্যাকেজ"],["Choose cover","কভার বেছে নিন"],["Custom cover image selected","নিজের কভার ছবি বেছে নেওয়া হয়েছে"],
-        ["Seller mode","সেলার মোড"],["Personal balance:","ব্যক্তিগত ব্যালেন্স:"],["Profile photo: AI-generated","প্রোফাইল ছবি: AI দিয়ে তৈরি"],["Upload profile photo","প্রোফাইল ছবি আপলোড করুন"],["Selling","বিক্রি"],["Earnings","আয়"],["Custom offer templates","কাস্টম অফার টেমপ্লেট"],["Briefs","ব্রিফ"],["Share Gigs","গিগ শেয়ার করুন"],["My profile","আমার প্রোফাইল"],["Manage Gigs","গিগ পরিচালনা"],["Availability","উপলব্ধতা"],["Invite friends","বন্ধুদের আমন্ত্রণ"],["Settings","সেটিংস"],["Preferences","পছন্দসমূহ"],["Account","অ্যাকাউন্ট"],["Resources","রিসোর্স"],["Support","সাপোর্ট"],["App Status — System Check","অ্যাপের অবস্থা — সিস্টেম চেক"],["Community and legal","কমিউনিটি ও আইনি"],["Buyer mode is on","বায়ার মোড চালু আছে"],["Turn Seller mode on (above) to see Earnings, Manage Gigs and the other Selling tools.","আয়, গিগ পরিচালনা ও বাকি বিক্রির টুল দেখতে উপরে সেলার মোড চালু করুন।"],["My gigs","আমার গিগ"],["Orders placed","দেওয়া অর্ডার"],["Orders received","পাওয়া অর্ডার"],["Available balance","তোলার মতো ব্যালেন্স"],["Identity verification","পরিচয় যাচাই"],["Gmail account","Gmail অ্যাকাউন্ট"],["Guest mode — not signed in","গেস্ট মোড — সাইন ইন করা নেই"],["NID information","NID তথ্য"],["Guest mode — sign in with your own Gmail and NID from this page to verify","গেস্ট মোড — যাচাই করতে এই পেজ থেকে নিজের Gmail ও NID দিয়ে সাইন ইন করুন"],["NID review","NID যাচাই"],["Your identity has been verified — buyers and sellers can trust your profile.","আপনার পরিচয় যাচাই হয়ে গেছে — বায়ার ও সেলার আপনার প্রোফাইলে আস্থা রাখতে পারবে।"],["Your NID details are being reviewed. You can keep using KAJZO while the review runs.","আপনার NID তথ্য যাচাই চলছে। যাচাই চলার সময়ও KAJZO ব্যবহার চালিয়ে যেতে পারবেন।"],["Verified ✓","যাচাই হয়েছে ✓"],["Submitted","জমা হয়েছে"],["Connected","সংযুক্ত"],["Seller dashboard","সেলার ড্যাশবোর্ড"],["Total earnings","মোট আয়"],["Available to withdraw","তোলার মতো আছে"],["Pending clearance","ছাড়ের অপেক্ষায়"],["Active orders","চলমান অর্ডার"],["Withdraw earnings","আয় তুলুন"],["Account number","অ্যাকাউন্ট নম্বর"],["Request withdrawal","টাকা তোলার অনুরোধ করুন"],["Withdrawals are processed within 24 hours.","টাকা তোলার অনুরোধ ২৪ ঘণ্টার মধ্যে প্রক্রিয়া করা হয়।"],["Available balance:","তোলার মতো ব্যালেন্স:"],["Withdrawal history","টাকা তোলার ইতিহাস"],["No orders received yet. When a buyer orders one of your gigs, it will appear here.","এখনো কোনো অর্ডার পাননি। বায়ার আপনার কোনো গিগ অর্ডার করলে এখানে দেখা যাবে।"],["My details","আমার বিবরণ"],["Full name (NID)","পুরো নাম (NID)"],["Gmail","Gmail"],["NID number","NID নম্বর"],["Date of birth","জন্ম তারিখ"],["Phone","ফোন"],["Account type","অ্যাকাউন্টের ধরন"],["You have not posted any gigs yet","আপনি এখনো কোনো গিগ পোস্ট করেননি"],["Post your first gig and buyers will find it on the Gigs page.","আপনার প্রথম গিগ পোস্ট করুন, বায়ার সেটি গিগ পেজে খুঁজে পাবে।"],["Post your first gig","আপনার প্রথম গিগ পোস্ট করুন"],["My orders","আমার অর্ডার"],["No orders yet. When you buy a gig, it will appear here.","এখনো কোনো অর্ডার নেই। গিগ কিনলে এখানে দেখা যাবে।"],
+        ["Seller mode","সেলার মোড"],["Personal balance:","ব্যক্তিগত ব্যালেন্স:"],["Profile photo: AI-generated","প্রোফাইল ছবি: AI দিয়ে তৈরি"],["Upload profile photo","প্রোফাইল ছবি আপলোড করুন"],["Selling","বিক্রি"],["Earnings","আয়"],["Custom offer templates","কাস্টম অফার টেমপ্লেট"],["Briefs","ব্রিফ"],["Share Gigs","গিগ শেয়ার করুন"],["My profile","আমার প্রোফাইল"],["Manage Gigs","গিগ পরিচালনা"],["Edit","এডিট"],["Edit gig","গিগ এডিট করুন"],["Save changes","পরিবর্তন সেভ করুন"],["Back to Manage Gigs","গিগ পরিচালনায় ফিরে যান"],["Change anything below — title, category, packages and prices, description, keywords or the cover image — then tap Save changes. The update is saved to your gig in the database and shows on the Gigs page right away.","নিচে যা খুশি বদলান — টাইটেল, ক্যাটাগরি, প্যাকেজ ও দাম, বিবরণ, কীওয়ার্ড বা কভার ছবি — তারপর Save changes চাপুন। আপডেটটি ডাটাবেসে আপনার গিগে সেভ হয়ে সাথে সাথে গিগ পেজে দেখা যাবে।"],["Your current cover is shown below. Upload a new image only if you want to change it:","আপনার বর্তমান কভার নিচে দেখানো হচ্ছে। বদলাতে চাইলেই শুধু নতুন ছবি আপলোড করুন:"],["Availability","উপলব্ধতা"],["Invite friends","বন্ধুদের আমন্ত্রণ"],["Settings","সেটিংস"],["Preferences","পছন্দসমূহ"],["Account","অ্যাকাউন্ট"],["Resources","রিসোর্স"],["Support","সাপোর্ট"],["App Status — System Check","অ্যাপের অবস্থা — সিস্টেম চেক"],["Community and legal","কমিউনিটি ও আইনি"],["Buyer mode is on","বায়ার মোড চালু আছে"],["Turn Seller mode on (above) to see Earnings, Manage Gigs and the other Selling tools.","আয়, গিগ পরিচালনা ও বাকি বিক্রির টুল দেখতে উপরে সেলার মোড চালু করুন।"],["My gigs","আমার গিগ"],["Orders placed","দেওয়া অর্ডার"],["Orders received","পাওয়া অর্ডার"],["Available balance","তোলার মতো ব্যালেন্স"],["Identity verification","পরিচয় যাচাই"],["Gmail account","Gmail অ্যাকাউন্ট"],["Guest mode — not signed in","গেস্ট মোড — সাইন ইন করা নেই"],["NID information","NID তথ্য"],["Guest mode — sign in with your own Gmail and NID from this page to verify","গেস্ট মোড — যাচাই করতে এই পেজ থেকে নিজের Gmail ও NID দিয়ে সাইন ইন করুন"],["NID review","NID যাচাই"],["Your identity has been verified — buyers and sellers can trust your profile.","আপনার পরিচয় যাচাই হয়ে গেছে — বায়ার ও সেলার আপনার প্রোফাইলে আস্থা রাখতে পারবে।"],["Your NID details are being reviewed. You can keep using KAJZO while the review runs.","আপনার NID তথ্য যাচাই চলছে। যাচাই চলার সময়ও KAJZO ব্যবহার চালিয়ে যেতে পারবেন।"],["Verified ✓","যাচাই হয়েছে ✓"],["Submitted","জমা হয়েছে"],["Connected","সংযুক্ত"],["Seller dashboard","সেলার ড্যাশবোর্ড"],["Total earnings","মোট আয়"],["Available to withdraw","তোলার মতো আছে"],["Pending clearance","ছাড়ের অপেক্ষায়"],["Active orders","চলমান অর্ডার"],["Withdraw earnings","আয় তুলুন"],["Account number","অ্যাকাউন্ট নম্বর"],["Request withdrawal","টাকা তোলার অনুরোধ করুন"],["Withdrawals are processed within 24 hours.","টাকা তোলার অনুরোধ ২৪ ঘণ্টার মধ্যে প্রক্রিয়া করা হয়।"],["Available balance:","তোলার মতো ব্যালেন্স:"],["Withdrawal history","টাকা তোলার ইতিহাস"],["No orders received yet. When a buyer orders one of your gigs, it will appear here.","এখনো কোনো অর্ডার পাননি। বায়ার আপনার কোনো গিগ অর্ডার করলে এখানে দেখা যাবে।"],["My details","আমার বিবরণ"],["Full name (NID)","পুরো নাম (NID)"],["Gmail","Gmail"],["NID number","NID নম্বর"],["Date of birth","জন্ম তারিখ"],["Phone","ফোন"],["Account type","অ্যাকাউন্টের ধরন"],["You have not posted any gigs yet","আপনি এখনো কোনো গিগ পোস্ট করেননি"],["Post your first gig and buyers will find it on the Gigs page.","আপনার প্রথম গিগ পোস্ট করুন, বায়ার সেটি গিগ পেজে খুঁজে পাবে।"],["Post your first gig","আপনার প্রথম গিগ পোস্ট করুন"],["My orders","আমার অর্ডার"],["No orders yet. When you buy a gig, it will appear here.","এখনো কোনো অর্ডার নেই। গিগ কিনলে এখানে দেখা যাবে।"],
         ["Welcome to KAJZO — Official Global App","KAJZO-তে স্বাগতম — অফিসিয়াল গ্লোবাল অ্যাপ"],["Join from any country in 3 steps: 1) mobile number, 2) Gmail, 3) ID / NID information. Then post gigs, message and order worldwide. Bangla and English both work.","যেকোনো দেশ থেকে ৩ ধাপে যোগ দিন: ১) মোবাইল নম্বর, ২) Gmail, ৩) ID / NID তথ্য। তারপর গিগ পোস্ট করুন, মেসেজ করুন ও বিশ্বজুড়ে অর্ডার করুন। বাংলা ও English দুটোই চলে।"],["Step 1 — Mobile:","ধাপ ১ — মোবাইল:"],["your mobile number with country code","দেশের কোডসহ আপনার মোবাইল নম্বর"],["Step 2 — Country:","ধাপ ২ — দেশ:"],["pick your country / area so buyers near you — and worldwide — can find you","আপনার দেশ / এলাকা বেছে নিন, যাতে কাছের — ও বিশ্বজুড়ে — বায়ার আপনাকে খুঁজে পায়"],["Step 3 — ID / NID:","ধাপ ৩ — ID / NID:"],["your national ID number and front/back photos — for trust","আস্থার জন্য আপনার জাতীয় ID নম্বর ও সামনে/পেছনের ছবি"],["Continue with Gmail","Gmail দিয়ে এগিয়ে যান"],["Sign-in runs through Supabase Auth (Google). Your profile, gigs, orders, messages and notifications are saved in the database and stay on every device.","সাইন ইন হয় Supabase Auth (Google) দিয়ে। আপনার প্রোফাইল, গিগ, অর্ডার, মেসেজ ও নোটিফিকেশন ডাটাবেসে সেভ থাকে এবং সব ডিভাইসে থাকে।"],["Continue with email & NID form instead","বরং ইমেইল ও NID ফর্ম দিয়ে এগিয়ে যান"],["then verify with your NID","তারপর NID দিয়ে যাচাই করুন"],["Your Gmail account","আপনার Gmail অ্যাকাউন্ট"],["Gmail address","Gmail ঠিকানা"],["NID card information","NID কার্ডের তথ্য"],["Full name (as on NID card)","পুরো নাম (NID কার্ডে যেমন আছে)"],["Mobile number","মোবাইল নম্বর"],["Your country / area","আপনার দেশ / এলাকা"],["NID card photo — front","NID কার্ডের ছবি — সামনে"],["NID card photo — back","NID কার্ডের ছবি — পেছনে"],["Verify NID & create my profile","NID যাচাই করে আমার প্রোফাইল তৈরি করুন"],["Your NID details are used to verify your identity so buyers and sellers can trust your profile.","আপনার NID তথ্য পরিচয় যাচাইয়ে ব্যবহার হয়, যাতে বায়ার ও সেলার আপনার প্রোফাইলে আস্থা রাখতে পারে।"],["Please enter a valid Gmail address (ending in @gmail.com).","সঠিক Gmail ঠিকানা দিন (@gmail.com দিয়ে শেষ হতে হবে)।"],["Please enter your full NID number (at least 10 digits).","আপনার পুরো NID নম্বর দিন (কমপক্ষে ১০ সংখ্যা)।"],["Please enter a valid mobile number.","সঠিক মোবাইল নম্বর দিন।"],["NID photo attached","NID ছবি যোগ হয়েছে"],["Sign in with your Gmail account — that is all you need. No password to set here, no ID / NID, no forms to fill. Then post gigs, message and order worldwide. Bangla and English both work.","আপনার Gmail অ্যাকাউন্ট দিয়ে সাইন ইন করুন — এটুকুই যথেষ্ট। এখানে কোনো পাসওয়ার্ড বসাতে হবে না, কোনো ID / NID লাগবে না, কোনো ফর্ম পূরণ করতে হবে না। তারপর গিগ পোস্ট করুন, মেসেজ করুন ও বিশ্বজুড়ে অর্ডার করুন। বাংলা ও English দুটোই চলে।"],["Tap the button and Google shows your Gmail accounts — tap yours, tap Continue, and you are signed in. Your profile, gigs, orders, messages and notifications are saved in the database and stay on every device.","বাটনে ট্যাপ করলে Google আপনার Gmail অ্যাকাউন্টগুলো দেখাবে — নিজেরটায় ট্যাপ করুন, Continue চাপুন, সাইন ইন হয়ে যাবে। আপনার প্রোফাইল, গিগ, অর্ডার, মেসেজ ও নোটিফিকেশন ডাটাবেসে সেভ থাকে এবং সব ডিভাইসে থাকে।"],["You stay signed in.","আপনি সাইন ইন অবস্থায়ই থাকবেন।"],["Once you sign in, KAJZO keeps you signed in on this device until you tap Log out — closing the app never logs you out. Next time, just tap Continue with Gmail and pick your account.","একবার সাইন ইন করলে, Log out না চাপা পর্যন্ত KAJZO আপনাকে এই ডিভাইসে সাইন ইন রাখবে — অ্যাপ বন্ধ করলে লগ আউট হয় না। পরের বার শুধু Continue with Gmail চেপে নিজের অ্যাকাউন্ট বেছে নিলেই হবে।"],["One tap on Google's account screen — no password needed","Google-এর অ্যাকাউন্ট স্ক্রিনে এক ট্যাপ — পাসওয়ার্ড লাগবে না"],["Sign in:","সাইন ইন:"],["Just tap Continue with Gmail — no ID, no paperwork. You stay signed in until you tap Log out.","শুধু Continue with Gmail চাপুন — কোনো ID লাগবে না, কোনো কাগজপত্র লাগবে না। Log out না চাপা পর্যন্ত আপনি সাইন ইন অবস্থায়ই থাকবেন।"],
-        ["Ready-made replies you can reuse in chats and custom offers.","চ্যাট ও কাস্টম অফারে আবার ব্যবহার করা যায় এমন তৈরি উত্তর।"],["Copy template","টেমপ্লেট কপি করুন"],["Add a template","টেমপ্লেট যোগ করুন"],["Template name","টেমপ্লেটের নাম"],["Template text","টেমপ্লেটের লেখা"],["Save template","টেমপ্লেট সেভ করুন"],["Template saved","টেমপ্লেট সেভ হয়েছে"],["Template copied","টেমপ্লেট কপি হয়েছে"],["Buyers post briefs describing work they need. Respond to a brief to get the conversation started.","বায়ার তাদের দরকারি কাজের ব্রিফ পোস্ট করে। ব্রিফে সাড়া দিয়ে কথোপকথন শুরু করুন।"],["Responded ✓","সাড়া দেওয়া হয়েছে ✓"],["Respond to brief","ব্রিফে সাড়া দিন"],["Copy a gig line and paste it anywhere — Facebook, WhatsApp, or your own page.","গিগের লাইন কপি করে যেকোনো জায়গায় পেস্ট করুন — Facebook, WhatsApp বা নিজের পেজে।"],["You have no gigs yet. Post a gig first, then share it from here.","আপনার এখনো কোনো গিগ নেই। আগে গিগ পোস্ট করুন, তারপর এখান থেকে শেয়ার করুন।"],["Full name","পুরো নাম"],["Guest mode","গেস্ট মোড"],["Seller level","সেলার লেভেল"],["ID / NID","ID / NID"],["See full profile below","নিচে পুরো প্রোফাইল দেখুন"],["Pause a gig to hide it from the Gigs page, or activate it again any time.","গিগ বন্ধ রাখলে গিগ পেজ থেকে লুকিয়ে থাকবে, যেকোনো সময় আবার চালু করতে পারবেন।"],["No gigs yet.","এখনো কোনো গিগ নেই।"],["+ Post a new Gig","+ নতুন গিগ পোস্ট করুন"],["Let buyers know whether you can take new work right now.","বায়ারকে জানান আপনি এখন নতুন কাজ নিতে পারবেন কি না।"],["Available for work","কাজের জন্য উপলব্ধ"],["Buyers can order and message you.","বায়ার অর্ডার ও মেসেজ করতে পারবে।"],["Busy","ব্যস্ত"],["Your gigs stay visible; you reply when you can.","আপনার গিগ দেখা যাবে; সময় পেলে উত্তর দেবেন।"],["On vacation","ছুটিতে"],["You are away — buyers see you are unavailable.","আপনি বাইরে — বায়ার দেখবে আপনি উপলব্ধ নন।"],["Current","বর্তমান"],["Share your invite code with friends. When they join KAJZO with your code, you both get discovered faster by buyers.","বন্ধুদের সাথে আপনার আমন্ত্রণ কোড শেয়ার করুন। তারা আপনার কোড দিয়ে KAJZO-তে যোগ দিলে দুজনেই বায়ারের কাছে দ্রুত পৌঁছাবেন।"],["Your invite code","আপনার আমন্ত্রণ কোড"],["Copy invite code","আমন্ত্রণ কোড কপি করুন"],["Friends invited so far:","এখন পর্যন্ত আমন্ত্রিত বন্ধু:"],["Invite code copied","আমন্ত্রণ কোড কপি হয়েছে"],["Share invite","আমন্ত্রণ শেয়ার করুন"],["Copy invite message","আমন্ত্রণ বার্তা কপি করুন"],["Invite message copied — paste it anywhere","আমন্ত্রণ বার্তা কপি হয়েছে — যেকোনো জায়গায় পেস্ট করুন"],["Your friend signs in with Gmail, opens Profile → Invite friends and enters this code. The join is saved to Supabase and your friend appears in your list below.","আপনার বন্ধু Gmail দিয়ে সাইন ইন করে Profile → Invite friends খুলে এই কোডটি দেবে। যোগদান Supabase-এ সেভ হবে এবং আপনার বন্ধু নিচের তালিকায় দেখা যাবে।"],["Your invite code appears here as soon as your Google sign-in connects to the database.","আপনার Google সাইন ইন ডাটাবেসে যুক্ত হলেই আপনার আমন্ত্রণ কোড এখানে দেখা যাবে।"],["Joined with invite code:","আমন্ত্রণ কোড দিয়ে যোগ দিয়েছেন:"],["Have a friend's invite code?","বন্ধুর আমন্ত্রণ কোড আছে?"],["Enter the code and save it to your account — your friend will see you in their invite list.","কোডটি দিয়ে আপনার অ্যাকাউন্টে সেভ করুন — আপনার বন্ধু তার আমন্ত্রণ তালিকায় আপনাকে দেখতে পাবে।"],["Save invite code","আমন্ত্রণ কোড সেভ করুন"],["Invite code","আমন্ত্রণ কোড"],["Loading your invite list from the database…","ডাটাবেস থেকে আপনার আমন্ত্রণ তালিকা লোড হচ্ছে…"],["No one has joined with your code yet. Share your code — when a friend signs in and enters it, they appear here.","এখনো কেউ আপনার কোড দিয়ে যোগ দেয়নি। কোড শেয়ার করুন — বন্ধু সাইন ইন করে কোড দিলে এখানে দেখা যাবে।"],["Joined ✓","যোগ দিয়েছে ✓"],["Joined","যোগ দিয়েছে"],["Copy invite link","আমন্ত্রণ লিংক কপি করুন"],["Invite link copied — send it to a friend","আমন্ত্রণ লিংক কপি হয়েছে — বন্ধুকে পাঠান"],["Invite code received ✓ — sign in with Gmail and your join is saved automatically","ইনভাইট কোড পাওয়া গেছে ✓ — Gmail দিয়ে সাইন ইন করলেই আপনার যোগদান অটোমেটিক সেভ হয়ে যাবে"],["No internet connection — KAJZO needs internet to sign in. Please connect, then try again","ইন্টারনেট সংযোগ নেই — সাইন ইন করতে KAJZO-এর ইন্টারনেট লাগবে। সংযোগ দিয়ে আবার চেষ্টা করুন"],["Sign-in could not start — your browser blocked the Google tab. Please allow pop-ups for KAJZO, then try again","সাইন ইন শুরু করা যায়নি — আপনার ব্রাউজার Google ট্যাবটি আটকে দিয়েছে। KAJZO-এর জন্য পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন"],["Share invite sends your friend a link that opens KAJZO with your code already filled in — they just sign in with Gmail and the join is saved to your account. They can also type the code in Profile → Invite friends. When they join, they appear in your list below.","শেয়ার ইনভাইট চাপলে আপনার বন্ধু এমন একটি লিংক পাবে, যা আপনার কোড আগেই বসানো অবস্থায় KAJZO খুলবে — তারা শুধু Gmail দিয়ে সাইন ইন করলেই যোগদান আপনার অ্যাকাউন্টে সেভ হয়ে যাবে। তারা চাইলে Profile → Invite friends-এ গিয়ে কোডটিও লিখতে পারে। তারা যোগ দিলে নিচের তালিকায় দেখা যাবে।"],["Sign in with Google to see your invite list.","আপনার আমন্ত্রণ তালিকা দেখতে Google দিয়ে সাইন ইন করুন।"],["Language / ভাষা","ভাষা / Language"],["Prices are currently shown in","দাম এখন দেখানো হচ্ছে"],[". Change it from the currency picker at the top of the page."," মুদ্রায়। পেজের উপরের মুদ্রা বাছাই থেকে বদলান।"],["Message & order notifications","মেসেজ ও অর্ডারের নোটিফিকেশন"],["Low data mode","কম ডেটা মোড"],["Toggle low-data (lite) mode","কম ডেটা (লাইট) মোড চালু/বন্ধ করুন"],["Mode","মোড"],["Seller mode ON","সেলার মোড চালু"],["Buyer mode","বায়ার মোড"],["Community rule: be honest, deliver what your gig promises, and keep all communication inside KAJZO messages.","কমিউনিটির নিয়ম: সৎ থাকুন, গিগে যা প্রতিশ্রুতি দিয়েছেন তাই ডেলিভারি দিন, আর সব যোগাযোগ KAJZO মেসেজের ভিতরেই রাখুন।"],["Selling on KAJZO","KAJZO-তে বিক্রি"],
+        ["Ready-made replies you can reuse in chats and custom offers.","চ্যাট ও কাস্টম অফারে আবার ব্যবহার করা যায় এমন তৈরি উত্তর।"],["Copy template","টেমপ্লেট কপি করুন"],["Add a template","টেমপ্লেট যোগ করুন"],["Template name","টেমপ্লেটের নাম"],["Template text","টেমপ্লেটের লেখা"],["Save template","টেমপ্লেট সেভ করুন"],["Template saved","টেমপ্লেট সেভ হয়েছে"],["Template copied","টেমপ্লেট কপি হয়েছে"],["Buyers post briefs describing work they need. Respond to a brief to get the conversation started.","বায়ার তাদের দরকারি কাজের ব্রিফ পোস্ট করে। ব্রিফে সাড়া দিয়ে কথোপকথন শুরু করুন।"],["Responded ✓","সাড়া দেওয়া হয়েছে ✓"],["Respond to brief","ব্রিফে সাড়া দিন"],["Copy a gig line and paste it anywhere — Facebook, WhatsApp, or your own page.","গিগের লাইন কপি করে যেকোনো জায়গায় পেস্ট করুন — Facebook, WhatsApp বা নিজের পেজে।"],["You have no gigs yet. Post a gig first, then share it from here.","আপনার এখনো কোনো গিগ নেই। আগে গিগ পোস্ট করুন, তারপর এখান থেকে শেয়ার করুন।"],["Full name","পুরো নাম"],["Guest mode","গেস্ট মোড"],["Seller level","সেলার লেভেল"],["ID / NID","ID / NID"],["See full profile below","নিচে পুরো প্রোফাইল দেখুন"],["Pause a gig to hide it from the Gigs page, or activate it again any time.","গিগ বন্ধ রাখলে গিগ পেজ থেকে লুকিয়ে থাকবে, যেকোনো সময় আবার চালু করতে পারবেন।"],["Edit a gig to change its title, price, description or cover image. Pause a gig to hide it from the Gigs page, or activate it again any time.","গিগের টাইটেল, দাম, বিবরণ বা কভার ছবি বদলাতে Edit চাপুন। গিগ বন্ধ রাখলে গিগ পেজ থেকে লুকিয়ে থাকবে, যেকোনো সময় আবার চালু করতে পারবেন।"],["No gigs yet.","এখনো কোনো গিগ নেই।"],["+ Post a new Gig","+ নতুন গিগ পোস্ট করুন"],["Let buyers know whether you can take new work right now.","বায়ারকে জানান আপনি এখন নতুন কাজ নিতে পারবেন কি না।"],["Available for work","কাজের জন্য উপলব্ধ"],["Buyers can order and message you.","বায়ার অর্ডার ও মেসেজ করতে পারবে।"],["Busy","ব্যস্ত"],["Your gigs stay visible; you reply when you can.","আপনার গিগ দেখা যাবে; সময় পেলে উত্তর দেবেন।"],["On vacation","ছুটিতে"],["You are away — buyers see you are unavailable.","আপনি বাইরে — বায়ার দেখবে আপনি উপলব্ধ নন।"],["Current","বর্তমান"],["Share your invite code with friends. When they join KAJZO with your code, you both get discovered faster by buyers.","বন্ধুদের সাথে আপনার আমন্ত্রণ কোড শেয়ার করুন। তারা আপনার কোড দিয়ে KAJZO-তে যোগ দিলে দুজনেই বায়ারের কাছে দ্রুত পৌঁছাবেন।"],["Your invite code","আপনার আমন্ত্রণ কোড"],["Copy invite code","আমন্ত্রণ কোড কপি করুন"],["Friends invited so far:","এখন পর্যন্ত আমন্ত্রিত বন্ধু:"],["Invite code copied","আমন্ত্রণ কোড কপি হয়েছে"],["Share invite","আমন্ত্রণ শেয়ার করুন"],["Copy invite message","আমন্ত্রণ বার্তা কপি করুন"],["Invite message copied — paste it anywhere","আমন্ত্রণ বার্তা কপি হয়েছে — যেকোনো জায়গায় পেস্ট করুন"],["Your friend signs in with Gmail, opens Profile → Invite friends and enters this code. The join is saved to Supabase and your friend appears in your list below.","আপনার বন্ধু Gmail দিয়ে সাইন ইন করে Profile → Invite friends খুলে এই কোডটি দেবে। যোগদান Supabase-এ সেভ হবে এবং আপনার বন্ধু নিচের তালিকায় দেখা যাবে।"],["Your invite code appears here as soon as your Google sign-in connects to the database.","আপনার Google সাইন ইন ডাটাবেসে যুক্ত হলেই আপনার আমন্ত্রণ কোড এখানে দেখা যাবে।"],["Joined with invite code:","আমন্ত্রণ কোড দিয়ে যোগ দিয়েছেন:"],["Have a friend's invite code?","বন্ধুর আমন্ত্রণ কোড আছে?"],["Enter the code and save it to your account — your friend will see you in their invite list.","কোডটি দিয়ে আপনার অ্যাকাউন্টে সেভ করুন — আপনার বন্ধু তার আমন্ত্রণ তালিকায় আপনাকে দেখতে পাবে।"],["Save invite code","আমন্ত্রণ কোড সেভ করুন"],["Invite code","আমন্ত্রণ কোড"],["Loading your invite list from the database…","ডাটাবেস থেকে আপনার আমন্ত্রণ তালিকা লোড হচ্ছে…"],["No one has joined with your code yet. Share your code — when a friend signs in and enters it, they appear here.","এখনো কেউ আপনার কোড দিয়ে যোগ দেয়নি। কোড শেয়ার করুন — বন্ধু সাইন ইন করে কোড দিলে এখানে দেখা যাবে।"],["Joined ✓","যোগ দিয়েছে ✓"],["Joined","যোগ দিয়েছে"],["Copy invite link","আমন্ত্রণ লিংক কপি করুন"],["Invite link copied — send it to a friend","আমন্ত্রণ লিংক কপি হয়েছে — বন্ধুকে পাঠান"],["Invite code received ✓ — sign in with Gmail and your join is saved automatically","ইনভাইট কোড পাওয়া গেছে ✓ — Gmail দিয়ে সাইন ইন করলেই আপনার যোগদান অটোমেটিক সেভ হয়ে যাবে"],["No internet connection — KAJZO needs internet to sign in. Please connect, then try again","ইন্টারনেট সংযোগ নেই — সাইন ইন করতে KAJZO-এর ইন্টারনেট লাগবে। সংযোগ দিয়ে আবার চেষ্টা করুন"],["Sign-in could not start — your browser blocked the Google tab. Please allow pop-ups for KAJZO, then try again","সাইন ইন শুরু করা যায়নি — আপনার ব্রাউজার Google ট্যাবটি আটকে দিয়েছে। KAJZO-এর জন্য পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন"],["Share invite sends your friend a link that opens KAJZO with your code already filled in — they just sign in with Gmail and the join is saved to your account. They can also type the code in Profile → Invite friends. When they join, they appear in your list below.","শেয়ার ইনভাইট চাপলে আপনার বন্ধু এমন একটি লিংক পাবে, যা আপনার কোড আগেই বসানো অবস্থায় KAJZO খুলবে — তারা শুধু Gmail দিয়ে সাইন ইন করলেই যোগদান আপনার অ্যাকাউন্টে সেভ হয়ে যাবে। তারা চাইলে Profile → Invite friends-এ গিয়ে কোডটিও লিখতে পারে। তারা যোগ দিলে নিচের তালিকায় দেখা যাবে।"],["Sign in with Google to see your invite list.","আপনার আমন্ত্রণ তালিকা দেখতে Google দিয়ে সাইন ইন করুন।"],["Language / ভাষা","ভাষা / Language"],["Prices are currently shown in","দাম এখন দেখানো হচ্ছে"],[". Change it from the currency picker at the top of the page."," মুদ্রায়। পেজের উপরের মুদ্রা বাছাই থেকে বদলান।"],["Message & order notifications","মেসেজ ও অর্ডারের নোটিফিকেশন"],["Low data mode","কম ডেটা মোড"],["Toggle low-data (lite) mode","কম ডেটা (লাইট) মোড চালু/বন্ধ করুন"],["Mode","মোড"],["Seller mode ON","সেলার মোড চালু"],["Buyer mode","বায়ার মোড"],["Community rule: be honest, deliver what your gig promises, and keep all communication inside KAJZO messages.","কমিউনিটির নিয়ম: সৎ থাকুন, গিগে যা প্রতিশ্রুতি দিয়েছেন তাই ডেলিভারি দিন, আর সব যোগাযোগ KAJZO মেসেজের ভিতরেই রাখুন।"],["Selling on KAJZO","KAJZO-তে বিক্রি"],
         ["Checked just now, from the live state of this app — nothing here is a guess:","এইমাত্র যাচাই করা হয়েছে, অ্যাপের লাইভ অবস্থা থেকে — এখানে কিছুই অনুমান নয়:"],["Database connection","ডাটাবেস সংযোগ"],["Sign-in","সাইন ইন"],["On this device","এই ডিভাইসে"],["Sign in with Google","Google দিয়ে সাইন ইন করুন"],["Checking the database connection right now — this takes a few seconds, and this row updates by itself when the answer arrives.","ডাটাবেস সংযোগ এখনই যাচাই হচ্ছে — কয়েক সেকেন্ড লাগবে, আর উত্তর এলেই এই সারি নিজে নিজে আপডেট হবে।"],["Database still not reachable — please check your connection and try again","ডাটাবেসে এখনো পৌঁছানো যাচ্ছে না — সংযোগ চেক করে আবার চেষ্টা করুন"],["Checking…","যাচাই হচ্ছে…"],["Gigs","গিগ"],["Active chats","সক্রিয় চ্যাট"],["Run check again","আবার যাচাই করুন"],["System check refreshed","সিস্টেম চেক আবার করা হয়েছে"],["Marketplace overview","মার্কেটপ্লেসের সারসংক্ষেপ"],["Gigs live","লাইভ গিগ"],["Orders in app","অ্যাপে অর্ডার"],["Open disputes","খোলা ডিসপিউট"],["Support tickets","সাপোর্ট টিকিট"],["Withdrawals requested","টাকা তোলার অনুরোধ"],["Unread notifications","অপঠিত নোটিফিকেশন"],["Database","ডাটাবেস"],["Review","যাচাই করুন"],["Your NID review","আপনার NID যাচাই"],["No gigs posted from this account yet.","এই অ্যাকাউন্ট থেকে এখনো কোনো গিগ পোস্ট হয়নি।"],["Total tickets","মোট টিকিট"],["Open / in review","খোলা / যাচাই চলছে"],["Connection","সংযোগ"],
         ["Support — Help line","সাপোর্ট — হেল্প লাইন"],["Write your problem or question here. Your message goes","আপনার সমস্যা বা প্রশ্ন এখানে লিখুন। আপনার মেসেজ সরাসরি"],["directly to the KAJZO support team","সরাসরি KAJZO সাপোর্ট দলের কাছে যায়"],["— they reply in this same thread.","— তারা এই একই থ্রেডে উত্তর দেয়।"],["Topic","বিষয়"],["Order problem","অর্ডার সমস্যা"],["Payment / withdrawal","পেমেন্ট / টাকা তোলা"],["Gig problem","গিগ সমস্যা"],["Account / login","অ্যাকাউন্ট / লগইন"],["Report a user","ব্যবহারকারীকে রিপোর্ট"],["Other question","অন্য প্রশ্ন"],["Related order (optional)","সম্পর্কিত অর্ডার (ঐচ্ছিক)"],["Your message","আপনার মেসেজ"],["Describe your problem clearly…","আপনার সমস্যাটি পরিষ্কার করে লিখুন…"],["Send to support team","সাপোর্ট দলের কাছে পাঠান"],["My support tickets","আমার সাপোর্ট টিকিট"],["No messages yet. Messages you send and the support replies will appear here.","এখনো কোনো মেসেজ নেই। আপনার পাঠানো মেসেজ ও সাপোর্টের উত্তর এখানে আসবে।"],["Add a reply","উত্তর যোগ করুন"],["Write more details for the support team…","সাপোর্ট দলের জন্য আরও বিস্তারিত লিখুন…"],["Send reply","উত্তর পাঠান"],["This ticket is resolved.","এই টিকিটের মীমাংসা হয়েছে।"],["Need more help? Send a new message below.","আরও সাহায্য লাগবে? নিচে নতুন মেসেজ পাঠান।"],["Please write a little more so the support team can help you.","সাপোর্ট দল যাতে সাহায্য করতে পারে, আরেকটু বিস্তারিত লিখুন।"],["Copied","কপি হয়েছে"],["Ticket sent — you will be notified when the support team replies","টিকিট পাঠানো হয়েছে — সাপোর্ট টিম উত্তর দিলে জানানো হবে"],["Ticket sent — waiting for the support team's reply. You will be notified here when they reply.","টিকিট পাঠানো হয়েছে — সাপোর্ট টিমের উত্তরের অপেক্ষায়। তারা উত্তর দিলে এখানেই জানানো হবে।"],
         ["Database: connecting…","ডাটাবেস: সংযোগ হচ্ছে…"],["Database: offline — local mode","ডাটাবেস: অফলাইন — লোকাল মোড"],["Database: live — saved permanently","ডাটাবেস: লাইভ — স্থায়ীভাবে সেভ হচ্ছে"],["Database: checking…","ডাটাবেস: যাচাই হচ্ছে…"],["Database: opening Google sign-in…","ডাটাবেস: Google সাইন ইন খুলছে…"],["Database: Google sign-in failed — use the form below","ডাটাবেস: Google সাইন ইন ব্যর্থ — নিচের ফর্মটি ব্যবহার করুন"],["Saved to favorites","পছন্দের তালিকায় সেভ হয়েছে"],["Removed from favorites","পছন্দের তালিকা থেকে সরানো হয়েছে"],["Signed out","সাইন আউট হয়েছে"],["Notifications ON","নোটিফিকেশন চালু"],["Notifications OFF","নোটিফিকেশন বন্ধ"],["Availability updated","উপলব্ধতা আপডেট হয়েছে"],["Your response was sent to the buyer","আপনার উত্তর বায়ারের কাছে পাঠানো হয়েছে"],["Gig paused — hidden from the Gigs page","গিগ বন্ধ — গিগ পেজ থেকে লুকানো হয়েছে"],["Gig is active again","গিগ আবার সক্রিয় হয়েছে"],["Seller mode ON — Selling tools are open","সেলার মোড চালু — বিক্রির টুল খুলে গেছে"],["Seller mode OFF — you are in Buyer mode","সেলার মোড বন্ধ — আপনি বায়ার মোডে আছেন"],["Delivery sent to the buyer","ডেলিভারি বায়ারের কাছে পাঠানো হয়েছে"],["Order completed — payment released","অর্ডার সম্পন্ন — পেমেন্ট ছেড়ে দেওয়া হয়েছে"],["Revision requested from the seller","সেলারের কাছে রিভিশন চাওয়া হয়েছে"],["Order cancelled — refund issued","অর্ডার বাতিল — রিফান্ড দেওয়া হয়েছে"],["Dispute submitted — KAJZO support is reviewing","ডিসপিউট জমা হয়েছে — KAJZO সাপোর্ট যাচাই করছে"],["Dispute withdrawn","ডিসপিউট তুলে নেওয়া হয়েছে"],["Custom cover image selected","নিজের কভার ছবি বেছে নেওয়া হয়েছে"],
