@@ -1837,29 +1837,42 @@
          ===================================================================== */
       var SESSION_STORE_KEY = "kajzo_session_v1";
       var LAST_EMAIL_KEY = "kajzo_last_email_v1";
+      /* The mirror goes through the SAME safe storage adapter as the
+         Supabase session itself (sbSafeStorage, cached). It used to read
+         window.localStorage directly: on browsers where merely touching
+         localStorage throws or is blocked (Brave Shields, framed app
+         views, blocked site data), every save/read silently failed, the
+         mirror never existed, and the user was asked to sign in again on
+         every open — the exact "log in again and again" complaint. */
+      var kajzoStoreCache = null;
+      function kajzoLocalStore(){
+        if (kajzoStoreCache) return kajzoStoreCache;
+        try { kajzoStoreCache = sbSafeStorage(); } catch(e){ kajzoStoreCache = { getItem:function(){ return null; }, setItem:function(){}, removeItem:function(){} }; }
+        return kajzoStoreCache;
+      }
       function persistLocalSession(){
         try {
-          if (!window.localStorage || !user || !user.email) return;
+          if (!user || !user.email) return;
           var slim = { name:user.name || "", email:user.email, phone:user.phone || "", district:user.district || "", role:user.role || "Seller", photo:(user.photo && String(user.photo).indexOf("https:") === 0 ? user.photo : null), photoAi:user.photoAi || null, savedAt:Date.now() };
-          window.localStorage.setItem(SESSION_STORE_KEY, JSON.stringify(slim));
-          window.localStorage.setItem(LAST_EMAIL_KEY, user.email);
-        } catch(e){ /* private mode / quota: the Supabase session still persists on its own */ }
+          kajzoLocalStore().setItem(SESSION_STORE_KEY, JSON.stringify(slim));
+          kajzoLocalStore().setItem(LAST_EMAIL_KEY, user.email);
+        } catch(e){ /* quota: the Supabase session still persists on its own */ }
       }
       function readLocalSession(){
         try {
-          var raw = window.localStorage ? window.localStorage.getItem(SESSION_STORE_KEY) : null;
+          var raw = kajzoLocalStore().getItem(SESSION_STORE_KEY);
           if (!raw) return null;
           var p = JSON.parse(raw);
           return (p && p.email) ? p : null;
         } catch(e){ return null; }
       }
       function lastUsedEmail(){
-        try { return (window.localStorage && window.localStorage.getItem(LAST_EMAIL_KEY)) || (readLocalSession() || {}).email || ""; } catch(e){ return ""; }
+        try { return kajzoLocalStore().getItem(LAST_EMAIL_KEY) || (readLocalSession() || {}).email || ""; } catch(e){ return ""; }
       }
       function clearLocalSession(){
         /* Log out only. LAST_EMAIL_KEY is deliberately kept: it powers the
            one-tap account offer on the next sign-in. */
-        try { if (window.localStorage) window.localStorage.removeItem(SESSION_STORE_KEY); } catch(e){}
+        try { kajzoLocalStore().removeItem(SESSION_STORE_KEY); } catch(e){}
       }
       function restoreLocalSession(){
         var s = readLocalSession();
@@ -3106,7 +3119,31 @@
             if (sbUser && sbUser.id === session.user.id && event !== "SIGNED_IN"){ /* same account, nothing to redo */ }
             else sbApplyAuthUser(session.user);
           }
-          else if (event === "SIGNED_OUT"){ sbUser = null; clearLocalSession(); }
+          else if (event === "SIGNED_OUT"){
+            sbUser = null;
+            if (sbExplicitSignOut){
+              /* The user tapped Log out in THIS app: the one and only way
+                 a saved session ends. Clear the mirror too. */
+              sbExplicitSignOut = false;
+              clearLocalSession();
+            } else {
+              /* Supabase also fires SIGNED_OUT when a token refresh is
+                 rejected — which happens in normal use whenever the same
+                 account is open in more than one tab / copy of the app
+                 and their refresh-token rotations race, or a second tab
+                 refreshes first. That is NOT the user logging out, so
+                 the saved device session must NOT be wiped: wiping it
+                 here is what kept throwing the user back to the sign-in
+                 page again and again. The account stays signed in on
+                 this device (the mirror above), and the silent recovery
+                 below re-attaches the database session as soon as a
+                 valid one exists again — no sign-in tap needed. */
+              if (user && user.email) persistLocalSession();
+              updateAuthUI();
+              setTimeout(sbRecheckSession, 3000);
+              setTimeout(sbRecheckSession, 15000);
+            }
+          }
         });
         /* The Google sign-in finishes in a NEW TAB (see sbGoogleSignIn).
            When that tab saves the session, this tab picks it up without a
@@ -3165,7 +3202,15 @@
          actually open day to day, the sign-in completes in the same
          app they started from. */
       var SB_OAUTH_RETURN_URL = "https://niazmarja7-star.github.io/kajzo-app/";
-      function sbOAuthReturnUrl(){ return SB_OAUTH_RETURN_URL; }
+      function sbOAuthReturnUrl(){
+        /* The return stays the app's one live public address: it is the
+           Site URL configured in Supabase and is on its redirect
+           allow-list, so a finished Google sign-in always lands on the
+           live app — the copy users open day to day — where the session
+           is saved in that copy's storage and, with the persistent
+           session above, restored on every later open until Log out. */
+        return SB_OAUTH_RETURN_URL;
+      }
       /* Navigate the pre-opened tab (or a fresh tab) to the Google
          authorize URL. Returns false only when no tab could be used and
          this page is framed, where a full-page jump would break the
@@ -3291,15 +3336,27 @@
         }
         return true;
       }
+      /* Set ONLY by sbSignOut below (the Log out buttons). The auth-state
+         listener checks it to tell a real, user-chosen log out apart from
+         a SIGNED_OUT the library fires on its own when a token refresh
+         fails — only the real one may clear the saved device session. */
+      var sbExplicitSignOut = false;
       function sbSignOut(){
         /* The ONLY way a session ends: an explicit Log out. It clears the
            Supabase session (saved token + refresh token) and the mirrored
            local session together, so the next open starts signed out.
            The last-used Gmail is kept, so signing back in is one tap on
            that account on Google's account screen. */
+        sbExplicitSignOut = true;
         if (sb){ try { sb.auth.signOut(); } catch(e){} }
         sbUser = null;
         clearLocalSession();
+        /* If the library was not loaded, no SIGNED_OUT event will arrive
+           to consume the flag — reset it here so a later token-refresh
+           failure is not mistaken for this log out. When the library IS
+           loaded its event consumes the flag first; this timer is only
+           a backstop and runs long after the event has fired. */
+        setTimeout(function(){ sbExplicitSignOut = false; }, 5000);
       }
 
       /* ---------- INTERNET REQUIRED — KAJZO is an online-only app ----------
