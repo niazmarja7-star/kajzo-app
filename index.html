@@ -1725,7 +1725,12 @@
       function applyLocalAvatar(){
         var stored = readAvatarLocal();
         if (!stored || !stored.photo || !user) return;
-        if (stored.pending && String(stored.photo).indexOf("data:") === 0) user.photo = stored.photo;
+        /* A data: copy is always a photo the user picked (the device copy,
+           or the copy saved into the profiles row when the bucket could
+           not be used) — it always beats the Google account picture,
+           pending or not. The old pending-only check let a saved photo
+           fall back to the Google picture once it was marked synced. */
+        if (String(stored.photo).indexOf("data:") === 0) user.photo = stored.photo;
         else if (!user.photo) user.photo = stored.photo;
         else if (String(stored.photo).indexOf("https:") === 0 && String(user.photo).indexOf("data:") !== 0) user.photo = stored.photo;
         if (stored.ai && !user.photoAi) user.photoAi = stored.ai;
@@ -1943,7 +1948,7 @@
       function persistLocalSession(){
         try {
           if (!user || !user.email) return;
-          var slim = { name:user.name || "", email:user.email, phone:user.phone || "", district:user.district || "", role:user.role || "Seller", photo:(user.photo && String(user.photo).indexOf("https:") === 0 ? user.photo : null), photoAi:user.photoAi || null, savedAt:Date.now() };
+          var slim = { name:user.name || "", email:user.email, phone:user.phone || "", district:user.district || "", role:user.role || "Seller", photo:(user.photo && (String(user.photo).indexOf("https:") === 0 || (String(user.photo).indexOf("data:image/") === 0 && String(user.photo).length <= 500000)) ? user.photo : null), photoAi:user.photoAi || null, savedAt:Date.now() };
           kajzoLocalStore().setItem(SESSION_STORE_KEY, JSON.stringify(slim));
           kajzoLocalStore().setItem(LAST_EMAIL_KEY, user.email);
         } catch(e){ /* quota: the Supabase session still persists on its own */ }
@@ -2320,12 +2325,32 @@
       function sbSaveProfile(){
         if (!sb || !sbUser || !user) return;
         var avUrl = safeImgUrl(user.photo, "");
-        /* Only a bucket (https) URL is written to avatar_url. A local data:
-           photo must never overwrite the saved URL with null — it is uploaded
-           to the bucket first (sbSyncLocalAvatar) and saved after that. */
+        /* avatar_url holds ONLY a photo the user actually saved: a
+           profile-photos bucket URL, or the in-database copy of a picked
+           photo (data: — see sbSavePhotoToProfileRow). The Google account
+           picture is NEVER written here: the old code wrote it at first
+           sign-in, and the sign-in load then mistook that Google URL for
+           the user's saved photo — one of the ways a picked photo kept
+           "not staying". A photo that is not saved yet (a data: copy
+           still waiting for its bucket upload) is included only in its
+           in-database form, never dropped to null. */
         var payload = { id: sbUser.id, email: user.email || sbUser.email || "", full_name: user.name || "" };
-        if (avUrl && avUrl.indexOf("https:") === 0) payload.avatar_url = avUrl;
+        if (avUrl && avUrl.indexOf("https:") === 0 && !/googleusercontent\.com/i.test(avUrl)) payload.avatar_url = avUrl;
+        else if (avUrl && avUrl.indexOf("data:image/") === 0 && avUrl.length <= 500000) payload.avatar_url = avUrl;
         sb.from("profiles").upsert(payload).then(function(){}).catch(function(){});
+      }
+      /* Permanence fallback for the profile photo: when the bucket
+         upload cannot be used (storage unavailable / policy), the
+         resized photo itself is saved into the account's profiles row
+         (avatar_url is a text column and this app renders data:image
+         avatars), so the photo IS in Supabase, loads back on every
+         sign-in, on every device and every copy of the app — instead of
+         living only in one browser's local storage, which is exactly
+         where it used to get lost. */
+      function sbSavePhotoToProfileRow(dataUrl, done){
+        if (!sb || !sbUser || !user || !dataUrl || String(dataUrl).indexOf("data:image/") !== 0 || String(dataUrl).length > 500000){ if (done) done(false); return; }
+        var payload = { id: sbUser.id, email: user.email || sbUser.email || "", full_name: user.name || "", avatar_url: String(dataUrl) };
+        sb.from("profiles").upsert(payload).then(function(res){ if (done) done(!(res && res.error)); }).catch(function(){ if (done) done(false); });
       }
       /* =====================================================================
          PROFILE OPTIONS — every option on the Profile page, activated
@@ -2705,7 +2730,26 @@
         if (!blob){ sbAvatarSyncing = false; return; }
         sbUpload("profile-photos", blob, sbUser.id).then(function(url){
           sbAvatarSyncing = false;
-          if (!url) return; /* keep the pending local copy — retried on next sign-in / profile open, never re-asked */
+          if (!url){
+            /* The bucket upload could not be used — do NOT leave the
+               photo only on this device (that is how it kept getting
+               lost). Save the photo into the account's profiles row
+               itself, so it is permanent in Supabase and loads back on
+               every sign-in. Only if that also fails does the pending
+               local copy stay, to be retried on the next sign-in /
+               profile open — never re-asked. */
+            sbSavePhotoToProfileRow(candidate, function(ok){
+              if (!ok || !user) return;
+              user.photo = candidate;
+              if (mySellerId && SELLERS[mySellerId]) SELLERS[mySellerId].photo = candidate;
+              persistAvatarLocal(candidate, user.photoAi || (stored && stored.ai) || null, false);
+              persistLocalSession();
+              toast("Profile photo saved to your account ✓");
+              updateAuthUI();
+              if (state.page === "profile") renderProfile();
+            });
+            return;
+          }
           if (!user) return;
           user.photo = url;
           if (mySellerId && SELLERS[mySellerId]) SELLERS[mySellerId].photo = url;
@@ -3182,8 +3226,15 @@
             var pav = safeImgUrl(res.data.avatar_url, "");
             var stored = readAvatarLocal();
             var hasPendingLocal = !!(stored && stored.pending && stored.photo && String(stored.photo).indexOf("data:") === 0);
-            if (pav && !hasPendingLocal){
-              /* The saved bucket URL is the permanent photo — load it back
+            /* A Google picture URL sitting in avatar_url (written by older
+               builds at first sign-in) is NOT a saved photo: it must never
+               replace a photo the user actually picked and saved on this
+               device. A bucket URL or an in-database (data:) photo IS the
+               saved photo and always loads back. */
+            var hasSavedLocal = !!(stored && stored.photo && (String(stored.photo).indexOf("data:") === 0 || /\/storage\/v1\/object\/public\//.test(String(stored.photo))));
+            var pavIsGooglePic = /googleusercontent\.com/i.test(pav);
+            if (pav && !hasPendingLocal && !(pavIsGooglePic && hasSavedLocal)){
+              /* The saved photo is the permanent photo — load it back
                  on every sign-in and cache it locally for instant display. */
               user.photo = pav;
               persistAvatarLocal(pav, user.photoAi || (stored && stored.ai) || null, false);
@@ -4374,7 +4425,7 @@
       }
       function messageSeller(gigId, orderNo){
         var g = findGig(gigId); if (!g) return;
-        if (mySellerId && g.seller === mySellerId){ toast("This is your own gig"); return; }
+        if (isMyGig(g)){ toast("This is your own gig"); return; }
         startChat(gigId, SELLERS[g.seller].name, "Seller", orderNo || null);
       }
       function startChat(gigId, otherName, otherRole, orderNo){
@@ -4936,7 +4987,7 @@
       function renderMenuPage(){
         var body = $("menuBody"); if (!body) return;
         var k = menuKey || "support";
-        var myGigs2 = GIGS.filter(function(g){ return g.seller === mySellerId; });
+        var myGigs2 = GIGS.filter(function(g){ return isMyGig(g); }); /* isMyGig, not the raw seller key — database gigs carry an "sb_…" seller key, so Share / Manage Gigs must match by account id too */
         var h = "";
         function checkRow(label, ok, warn, txt){
           /* ok === true → green OK · ok === "wait" → amber chip with the
@@ -5001,6 +5052,10 @@
             '<tr><td>Personal balance</td><td>' + money(personalBalance()) + '</td></tr>' +
             '<tr><td>Mode</td><td>' + (sellerMode ? "Seller mode" : "Buyer mode") + '</td></tr>' +
             '</table></div>' +
+            '<form class="form-card" id="mpNameForm" style="margin-top:1rem;"><h3 style="margin:.1rem 0 .5rem;">Full name</h3>' +
+            '<p style="color:var(--ink-2); line-height:1.6; margin:0 0 .7rem;">The name shown on your profile and your gigs — saved to your account in the database, so it loads back on every device you sign in on.</p>' +
+            '<div class="form-grid"><div class="field"><label for="mpName">Full name</label><input id="mpName" maxlength="60" placeholder="Your full name" value="' + esc(user.name || "") + '" /></div>' +
+            '<div class="field"><label aria-hidden="true">&nbsp;</label><button class="btn btn-green" type="submit">Save name</button></div></div></form>' +
             '<form class="form-card" id="mpPhoneForm" style="margin-top:1rem;"><h3 style="margin:.1rem 0 .5rem;">Phone number</h3>' +
             '<p style="color:var(--ink-2); line-height:1.6; margin:0 0 .7rem;">Your phone / WhatsApp number, saved to your account in the database — it loads back on every device you sign in on.</p>' +
             '<div class="form-grid"><div class="field"><label for="mpPhone">Phone / WhatsApp</label><input id="mpPhone" maxlength="20" placeholder="01XXXXXXXXX" value="' + esc(user.phone || "") + '" /></div>' +
@@ -5144,6 +5199,21 @@
         on("mpLangEn", "click", function(){ var b = $("langEn"); if (b) b.click(); renderMenuPage(); });
         on("mpNotifToggle", "click", function(){ prefNotifs = !prefNotifs; sbSaveProfileSettings(); toast("Notifications " + (prefNotifs ? "ON" : "OFF")); renderMenuPage(); });
         on("mpLiteToggle", "click", function(){ var b = $("liteToggle"); if (b) b.click(); });
+        var nmf = $("mpNameForm");
+        if (nmf) nmf.addEventListener("submit", function(e){
+          e.preventDefault();
+          var nm = $("mpName").value.trim();
+          if (!nm){ toast("Please enter your name"); return; }
+          user.name = nm;
+          if (SELLERS.me) SELLERS.me.name = nm;
+          if (mySellerId && SELLERS[mySellerId]) SELLERS[mySellerId].name = nm;
+          persistLocalSession();
+          sbSaveProfile(); /* full_name is upserted into the account's profiles row — the sign-in load reads it back from Supabase, so the new name is permanent on every device */
+          toast("Name saved to your account ✓");
+          renderMenuPage();
+          if (state.page === "profile") renderProfile();
+          renderGigs(); /* gig cards carry the seller name — repaint them with the new one */
+        });
         var phf = $("mpPhoneForm");
         if (phf) phf.addEventListener("submit", function(e){
           e.preventDefault();
@@ -5280,7 +5350,12 @@
            Supabase — the photo is loaded back, never requested again. */
         applyLocalAvatar();
         sbSyncLocalAvatar(false);
-        var myGigs = GIGS.filter(function(g){ return g.seller === mySellerId; });
+        /* My gigs are matched with isMyGig, never by the raw seller key:
+           a gig that came back from Supabase carries seller key
+           "sb_<account id>", not "me" — the old g.seller === mySellerId
+           filter counted 0 for exactly the gigs saved permanently in the
+           database, so the count and the list below never updated. */
+        var myGigs = GIGS.filter(function(g){ return isMyGig(g); });
         var received = [];
         conversations.forEach(function(c){ /* orders to me appear via myOrders of buyers in-session; seller-side list uses gig orders */ });
         var totalEarned = myGigs.reduce(function(a,g){ return a + g.orders * g.pkgs[0].price; }, 0);
