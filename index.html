@@ -3945,14 +3945,23 @@
          signs the user in — and because the live app is the copy users
          actually open day to day, the sign-in completes in the same
          app they started from. */
-      var SB_OAUTH_RETURN_URL = "https://niazmarja7-star.github.io/kajzo-app/";
+      var SB_OAUTH_RETURN_URL = "https://niazmarja7-star.github.io/kajzo-app/?v=2";
       function sbOAuthReturnUrl(){
         /* The return stays the app's one live public address: it is the
            Site URL configured in Supabase and is on its redirect
            allow-list, so a finished Google sign-in always lands on the
            live app — the copy users open day to day — where the session
            is saved in that copy's storage and, with the persistent
-           session above, restored on every later open until Log out. */
+           session above, restored on every later open until Log out.
+           The ?v=2 query is deliberate: while the short-domain CNAME
+           briefly pointed this bare address at is-a.dev, phones cached
+           that 301 redirect permanently, so a sign-in returning to the
+           bare URL was bounced to is-a.dev's "Available Domain" page
+           instead of the app. The query makes the return address
+           different from the cached one, so the browser goes straight
+           to KAJZO; the allow-list's github.io wildcard covers return
+           URLs with a query, and the app's session handling ignores
+           extra query parameters. */
         return SB_OAUTH_RETURN_URL;
       }
       /* Navigate the pre-opened tab (or a fresh tab) to the Google
