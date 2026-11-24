@@ -108,6 +108,9 @@
       .cat-strip button:hover{ color:var(--ink); border-bottom-color:var(--green); }
       .cat-strip button.active{ color:var(--ink); font-weight:700; border-bottom-color:var(--green); }
       .cat-strip button .chev{ font-size:.7rem; color:var(--ink-3); }
+      .cat-strip button svg.cat-ic{ flex:none; color:var(--ink-3); }
+      .cat-strip button:hover svg.cat-ic{ color:var(--green); }
+      .cat-strip button.active svg.cat-ic{ color:var(--green); }
       /* Fiverr-style top: logo | big search | bell, message, heart, Orders, avatar */
       .fiverr-top{ gap:1rem !important; flex-wrap:nowrap; }
       .header-search{ flex:1 1 auto; min-width:180px; display:flex; align-items:stretch; border:1px solid #c5c6c9; border-radius:4px; overflow:hidden; background:var(--surface); height:48px; }
@@ -115,9 +118,8 @@
       .header-search input{ flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font-size:1rem; padding:.65rem .9rem; }
       .header-search input:focus{ outline:none; }
       .header-search input::placeholder{ color:var(--ink-3); }
-      .header-search-btn{ width:52px; min-height:48px; border:0; background:#222222; color:#fff; display:grid; place-items:center; flex:none; cursor:pointer; }
-      .header-search-btn:hover{ background:#000; }
-      @media (prefers-color-scheme: dark){ .header-search-btn{ background:#f5f5f5; color:#111; } .header-search-btn:hover{ background:#fff; } }
+      .header-search-btn{ width:52px; min-height:48px; border:0; background:var(--green); color:#fff; display:grid; place-items:center; flex:none; cursor:pointer; }
+      .header-search-btn:hover{ background:var(--green-hover); }
       .header-actions{ display:flex; align-items:center; gap:.15rem; flex:none; margin-left:auto; }
       .header-actions .icon-btn{ width:42px; height:42px; min-height:42px; }
       .orders-btn{ background:none; border:0; font-weight:600; font-size:1rem; color:var(--ink-2); padding:.55rem .7rem; border-radius:6px; white-space:nowrap; }
@@ -339,10 +341,21 @@
       .no-reviews-box b{ color:var(--ink-2); }
       .gig-foot{ display:flex; justify-content:space-between; align-items:end; border-top:1px solid var(--line); margin-top:.75rem; padding-top:.7rem; }
       .gig-foot .from{ font-size:.82rem; color:var(--ink-3); display:block; }
-      .gig-foot .price{ font-size:1.22rem; font-weight:800; }
+      .gig-foot .price{ font-size:1.34rem; font-weight:800; color:var(--green); }
       .gig-foot .days{ font-size:.86rem; color:var(--ink-2); display:flex; gap:.3rem; align-items:center; }
       .msg-btn{ width:100%; margin-top:.7rem; padding:.52rem; font-size:.95rem; }
       .empty{ text-align:center; padding:3rem 1rem; color:var(--ink-2); background:var(--surface); border:1px dashed var(--line); border-radius:var(--radius); }
+
+      /* ---------- top sellers (homepage section, real sellers only) ---------- */
+      .seller-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; }
+      .ts-card{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:.42rem; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:1.35rem 1rem 1.2rem; color:var(--ink); font:inherit; cursor:pointer; width:100%; }
+      .ts-card:hover{ border-color:var(--green); }
+      .ts-avatar{ width:74px; height:74px; font-size:1.75rem; }
+      .ts-name{ font-weight:700; font-size:1.06rem; line-height:1.3; }
+      .ts-rating{ display:flex; align-items:center; gap:.35rem; font-size:.93rem; color:var(--ink-2); flex-wrap:wrap; justify-content:center; }
+      .ts-meta{ font-size:.88rem; color:var(--ink-3); font-weight:600; line-height:1.5; }
+      @media (max-width: 980px){ .seller-grid{ grid-template-columns:repeat(2,1fr); } }
+      @media (max-width: 480px){ .seller-grid{ grid-template-columns:1fr; } }
 
       /* ---------- screens (detail / order / post) ---------- */
       .screen{ position:fixed; inset:0; z-index:90; background:var(--bg); overflow-y:auto; display:none; }
@@ -914,6 +927,23 @@
 
     <!-- ======================= PAGE 1: GIGS ======================= -->
     <div class="page" id="page-gigs">
+      <!-- Homepage banner — headline + a working search over the live gig list -->
+      <section class="hero" aria-label="Find work, hire talent">
+        <div class="hero-in">
+          <h1>Find work, <span class="hl">hire talent</span></h1>
+          <p class="lead">Hire skilled freelancers from around the world — or post your own gig and get orders. Search a service to start.</p>
+          <form class="searchbox" id="heroSearchForm" role="search">
+            <input id="heroSearchInput" type="search" placeholder="Try “logo design”" aria-label="Search services" autocomplete="off" />
+            <button class="btn btn-green" type="submit">Search</button>
+          </form>
+          <div class="tags"><span>Popular:</span>
+            <button class="tagchip" type="button" data-pop="logo design">Logo design</button>
+            <button class="tagchip" type="button" data-pop="website design">Website design</button>
+            <button class="tagchip" type="button" data-pop="video editing">Video editing</button>
+            <button class="tagchip" type="button" data-pop="social media">Social media</button>
+          </div>
+        </div>
+      </section>
       <main class="wrap">
         <!-- Ways to Earn strip — ONLY on this first Gigs page, nowhere else in the app -->
         <div class="earn-strip" id="earnStripHome" style="margin-top:1rem;">
@@ -937,6 +967,18 @@
               <button class="btn btn-ghost" id="resetFilters" type="button">Clear all filters</button>
             </div>
           </div>
+        </section>
+
+        <!-- Top sellers — built live from real gigs, orders and buyer reviews;
+             hidden while there are no sellers with gigs yet -->
+        <section id="topSellersSec" aria-labelledby="topSellersH" hidden>
+          <div class="sec-head">
+            <div>
+              <h2 id="topSellersH">Top sellers</h2>
+              <p>Ranked by real orders and buyer reviews on KAJZO.</p>
+            </div>
+          </div>
+          <div class="seller-grid" id="topSellersGrid"></div>
         </section>
 
         <section aria-labelledby="howH" style="border-top:1px solid var(--line); margin-top:2.5rem; padding-top:2rem;">
@@ -4353,6 +4395,7 @@
       var STRIP_CATS = [
         { strip:"trending", cat:"all", name:"Trending", flame:true },
         { strip:"design", cat:"design", name:"Graphics & Design" },
+        { strip:"web", cat:"web", name:"Websites & Apps" },
         { strip:"programming", cat:"programming", name:"Programming & Tech" },
         { strip:"marketing", cat:"marketing", name:"Digital Marketing" },
         { strip:"video", cat:"video", name:"Video & Animation" },
@@ -4371,11 +4414,27 @@
           bs[i].classList.toggle("active", !!on);
         }
       }
+      /* small line icons for the category strip — one tap still filters the gigs */
+      function catIcon(inner){
+        return '<svg class="cat-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg> ';
+      }
+      var CAT_ICONS = {
+        web: catIcon('<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>'),
+        design: catIcon('<path d="M17 3l4 4L8 20l-5 1 1-5L17 3z"/>'),
+        programming: catIcon('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>'),
+        marketing: catIcon('<path d="M3 10v4h3l5 4V6l-5 4H3z"/><path d="M15.5 9.5a3.5 3.5 0 010 5"/>'),
+        video: catIcon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.3l5.2 2.7-5.2 2.7z" fill="currentColor" stroke="none"/>'),
+        writing: catIcon('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>'),
+        audio: catIcon('<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>'),
+        business: catIcon('<rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a3 3 0 013-3 3 3 0 013 3v1.5M3 12.8h18"/>'),
+        finance: catIcon('<circle cx="12" cy="12" r="9"/><path d="M12 6.6v10.8M15 8.7c-.6-.9-1.7-1.3-3-1.3-1.9 0-3.2 1-3.2 2.4 0 3.3 6.4 1.7 6.4 4.9 0 1.4-1.4 2.4-3.2 2.4-1.4 0-2.6-.6-3.2-1.5"/>'),
+        ai: catIcon('<path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3z"/>')
+      };
       (function renderStrip(){
         var strip = $("catStrip"); if (!strip) return;
         var flame = '<svg width="14" height="14" viewBox="0 0 24 24" fill="#f97316" aria-hidden="true"><path d="M12 2s1 3.5-1.2 6C9.3 10.2 8 11.6 8 14a4 4 0 008 0c0-1-.4-1.9-1-2.7-.3 1-.9 1.7-1.7 2.1.5-2.7-.3-6.4-1.3-8.4C12.6 3.9 12 2 12 2zM12 22a7 7 0 01-7-7c0-2.4 1.2-4.3 2.6-6C9.2 7 11 4.9 12 2c1 2.9 2.8 5 4.4 7C17.8 10.7 19 12.6 19 15a7 7 0 01-7 7z"/></svg>';
         strip.innerHTML = STRIP_CATS.map(function(c){
-          return '<button type="button" data-strip="' + c.strip + '" data-cat="' + c.cat + '">' + c.name + (c.flame ? ' ' + flame : '') + (c.chev ? ' <span class="chev" aria-hidden="true">▾</span>' : '') + '</button>';
+          return '<button type="button" data-strip="' + c.strip + '" data-cat="' + c.cat + '">' + (CAT_ICONS[c.strip] || '') + c.name + (c.flame ? ' ' + flame : '') + (c.chev ? ' <span class="chev" aria-hidden="true">▾</span>' : '') + '</button>';
         }).join("");
         syncStripActive();
         var bs = strip.querySelectorAll("[data-strip]");
@@ -4471,6 +4530,46 @@
         }
         var ft3 = $("favToggle"); if (ft3) ft3.setAttribute("aria-pressed", state.favOnly ? "true" : "false");
       }
+      /* ---------- top sellers section (homepage) ----------
+         Aggregated live from the real gig list: every seller with at least
+         one live gig, ranked by their real average review rating, then real
+         order count. Photos come from the seller's real profile photo;
+         sellers without one show their initial, like everywhere else.
+         Tapping a card searches that seller's name, which lists their gigs. */
+      function renderTopSellers(){
+        var sec = $("topSellersSec"), grid = $("topSellersGrid");
+        if (!sec || !grid) return;
+        var agg = {};
+        GIGS.forEach(function(g){
+          if (g.paused) return;
+          var a = agg[g.seller] || (agg[g.seller] = { key:g.seller, gigs:0, orders:0, revs:0, sum:0 });
+          a.gigs++; a.orders += Number(g.orders) || 0;
+          realReviews(g).forEach(function(r){ a.revs++; a.sum += Number(r.s) || 0; });
+        });
+        var list = Object.keys(agg).map(function(k){ return agg[k]; }).filter(function(a){ return !!SELLERS[a.key]; });
+        list.sort(function(x, y){
+          var rx = x.revs ? x.sum / x.revs : 0, ry = y.revs ? y.sum / y.revs : 0;
+          return (ry - rx) || (y.orders - x.orders) || (y.revs - x.revs) || (y.gigs - x.gigs);
+        });
+        list = list.slice(0, 6);
+        if (!list.length){ sec.hidden = true; grid.innerHTML = ""; return; }
+        sec.hidden = false;
+        grid.innerHTML = list.map(function(a){
+          var s = SELLERS[a.key];
+          var ratingHtml = a.revs
+            ? '<span class="stars" aria-hidden="true">' + stars(a.sum / a.revs) + '</span><b>' + (a.sum / a.revs).toFixed(1) + '</b><span>(' + a.revs + (a.revs === 1 ? " review" : " reviews") + ')</span>'
+            : '<span class="rating-new-badge">' + (LANG === "bn" ? "নতুন" : "New") + '</span><span class="rating-new-txt">' + (LANG === "bn" ? "এখনো কোনো রিভিউ নেই" : "No reviews yet") + '</span>';
+          return '<button class="ts-card" type="button" data-tseller="' + esc(s.name) + '">' +
+            avatarHTML(s, "ts-avatar") +
+            '<span class="ts-name sname">' + esc(s.name) + '</span>' +
+            '<span class="lvl ' + lvlClass(s.level) + '">' + esc(s.levelTxt || "") + '</span>' +
+            '<span class="ts-rating">' + ratingHtml + '</span>' +
+            '<span class="ts-meta">' + a.gigs + (LANG === "bn" ? "টি গিগ" : (a.gigs === 1 ? " gig" : " gigs")) + ' · ' + a.orders + (LANG === "bn" ? "টি অর্ডার" : (a.orders === 1 ? " order" : " orders")) + (s.place ? ' · ' + esc(s.place) : '') + '</span>' +
+          '</button>';
+        }).join("");
+        var cards = grid.querySelectorAll("[data-tseller]");
+        for (var i=0;i<cards.length;i++) cards[i].addEventListener("click", function(){ doSearch(this.getAttribute("data-tseller")); });
+      }
       function renderGigs(){
         refreshSellerLevels();
         var list = filteredGigs();
@@ -4488,6 +4587,7 @@
           : (LANG === "bn" ? "সেরা কাজ আগে — রেটিং আর শেষ করা অর্ডার অনুযায়ী সাজানো" : "Best first — sorted by rating and completed orders, from sellers around the world");
         syncFilterPills();
         bindCards();
+        renderTopSellers();
       }
       function bindCards(){
         var opens = document.querySelectorAll("[data-open]");
@@ -4531,6 +4631,8 @@
       $("topSearchForm").addEventListener("submit", function(e){ e.preventDefault(); doSearch(topSearchInput.value); });
       var headerSearchForm = $("headerSearchForm");
       if (headerSearchForm) headerSearchForm.addEventListener("submit", function(e){ e.preventDefault(); doSearch($("headerSearchInput").value); });
+      var heroSearchForm = $("heroSearchForm");
+      if (heroSearchForm) heroSearchForm.addEventListener("submit", function(e){ e.preventDefault(); doSearch($("heroSearchInput").value); });
       var popBtns = document.querySelectorAll("[data-pop]");
       for (var pi=0; pi<popBtns.length; pi++) popBtns[pi].addEventListener("click", function(){ doSearch(this.getAttribute("data-pop")); });
       topSearchClear.addEventListener("click", function(){
@@ -6769,6 +6871,7 @@
         ["All countries","সব দেশ"],["All types","সব ধরন"],["Online","অনলাইন"],["In person","সরাসরি"],["Both","দুটোই"],["Any price","যেকোনো দাম"],["Under $25","$25-এর কম"],["Over $200","$200-এর বেশি"],["Any time","যেকোনো সময়"],["1 day","১ দিন"],["3 days","৩ দিন"],["7 days","৭ দিন"],["All images","সব ছবি"],["AI only","শুধু AI"],["No AI label","AI লেবেল নেই"],["Best first","সেরা আগে"],["Highest rated","সর্বোচ্চ রেটিং"],["Most orders","সবচেয়ে বেশি অর্ডার"],["Lowest price","সবচেয়ে কম দাম"],["Highest price","সবচেয়ে বেশি দাম"],["Favorites","পছন্দের"],
         ["Graphics & Design","গ্রাফিক্স ও ডিজাইন"],["Programming & Tech","প্রোগ্রামিং ও টেক"],["Websites & Apps","ওয়েবসাইট ও অ্যাপ"],["AI Services","AI সার্ভিস"],["Digital Marketing","ডিজিটাল মার্কেটিং"],["Video & Animation","ভিডিও ও অ্যানিমেশন"],["Writing & Translation","লেখা ও অনুবাদ"],["Music & Audio","মিউজিক ও অডিও"],["Business","ব্যবসা"],["Data","ডেটা"],["Photography","ফটোগ্রাফি"],["Consulting","পরামর্শ"],["Lifestyle","লাইফস্টাইল"],["Trending","ট্রেন্ডিং"],["Finance","ফাইন্যান্স"],["Tutoring & Lessons","টিউশন ও পাঠ"],["Electrician & Repair","ইলেকট্রিশিয়ান ও মেরামত"],["Delivery & Transport","ডেলিভারি ও পরিবহন"],["All Categories","সব ক্যাটাগরি"],
         ["No gigs posted yet","এখনো কোনো গিগ পোস্ট হয়নি"],["No services have been posted on KAJZO yet. Be the first — post your gig and buyers from around the world will be able to find it here and order from you.","KAJZO-তে এখনো কোনো সার্ভিস পোস্ট হয়নি। আপনিই প্রথম হোন — গিগ পোস্ট করুন, সারা বিশ্বের বায়ার এখানে আপনার গিগ খুঁজে পাবে ও অর্ডার করতে পারবে।"],["+ Post a Gig","+ গিগ পোস্ট করুন"],["Post a Gig","গিগ পোস্ট করুন"],["No gigs found","কোনো গিগ পাওয়া যায়নি"],["Try a different keyword, or clear the filters.","অন্য শব্দ দিয়ে খুঁজুন, অথবা ফিল্টার মুছে ফেলুন।"],["How KAJZO works — 3 simple steps, anywhere in the world","KAJZO কীভাবে কাজ করে — ৩টি সহজ ধাপ, বিশ্বের যেকোনো জায়গা থেকে"],["1. Find a service & chat","১. সার্ভিস খুঁজুন ও চ্যাট করুন"],["Search by keyword, category or country. Check ratings and Basic / Standard / Premium packages, and message the seller before you order — from any country.","শব্দ, ক্যাটাগরি বা দেশ দিয়ে খুঁজুন। রেটিং ও Basic / Standard / Premium প্যাকেজ দেখুন, অর্ডারের আগে সেলারকে মেসেজ করুন — যেকোনো দেশ থেকে।"],["2. Pay securely in your currency","২. নিজের মুদ্রায় নিরাপদে পেমেন্ট করুন"],["Package price, service fee and total are shown upfront — no hidden charges. Pay by card, PayPal, bKash, Nagad, Rocket or Wise, in USD, BDT, EUR, GBP, INR and more.","প্যাকেজের দাম, সার্ভিস ফি ও মোট আগেই দেখানো হয় — কোনো লুকানো চার্জ নেই। কার্ড, PayPal, বিকাশ, নগদ, রকেট বা Wise দিয়ে পেমেন্ট করুন — USD, BDT, EUR, GBP, INR সহ আরও মুদ্রায়।"],["3. Get the work delivered","৩. কাজ ডেলিভারি পান"],["Track the order live from your profile, keep chatting, accept the delivery or use the revisions included in your package.","প্রোফাইল থেকে অর্ডার লাইভ ট্র্যাক করুন, চ্যাট চালিয়ে যান, ডেলিভারি গ্রহণ করুন অথবা প্যাকেজে থাকা রিভিশন ব্যবহার করুন।"],["Starting at","শুরু"],["★ Best seller","★ সেরা সেলার"],["AI-generated image","AI দিয়ে তৈরি ছবি"],["Reported as AI · Under review","AI হিসেবে রিপোর্ট করা · যাচাই চলছে"],["Message seller","সেলারকে মেসেজ করুন"],["Message","মেসেজ"],["View gig","গিগ দেখুন"],["About this gig","এই গিগ সম্পর্কে"],["Think this cover image is AI-generated? Report it","এই কভার ছবিটি AI দিয়ে তৈরি মনে হচ্ছে? রিপোর্ট করুন"],["AI-generated image.","AI দিয়ে তৈরি ছবি।"],["Reported as AI-generated.","AI দিয়ে তৈরি হিসেবে রিপোর্ট করা হয়েছে।"],["▶ Play voice sample","▶ ভয়েস নমুনা শুনুন"],["▶ Playing sample…","▶ নমুনা বাজছে…"],["Chat with the seller first if you have questions","প্রশ্ন থাকলে আগে সেলারের সাথে চ্যাট করুন"],
+        ["Find work,","কাজ খুঁজুন,"],["hire talent","দক্ষ মানুষ নিয়োগ করুন"],["Hire skilled freelancers from around the world — or post your own gig and get orders. Search a service to start.","সারা বিশ্বের দক্ষ ফ্রিল্যান্সার নিয়োগ করুন — অথবা নিজের গিগ পোস্ট করে অর্ডার পান। শুরু করতে সার্ভিস খুঁজুন।"],["Search services","সার্ভিস খুঁজুন"],["Try “logo design”","“লোগো ডিজাইন” লিখে দেখুন"],["Popular:","জনপ্রিয়:"],["Logo design","লোগো ডিজাইন"],["Website design","ওয়েবসাইট ডিজাইন"],["Video editing","ভিডিও এডিটিং"],["Social media","সোশ্যাল মিডিয়া"],["Top sellers","সেরা সেলার"],["Ranked by real orders and buyer reviews on KAJZO.","KAJZO-তে আসল অর্ডার ও বায়ার রিভিউ অনুযায়ী সাজানো।"],
         ["Categories — all Fiverr-style services","ক্যাটাগরি — সব Fiverr-ধাঁচের সার্ভিস"],["For Buyers","বায়ারদের জন্য"],["For Sellers","সেলারদের জন্য"],["About","সম্পর্কে"],["How ordering works","অর্ডার কীভাবে কাজ করে"],["Packages & revisions","প্যাকেজ ও রিভিশন"],["Refunds & cancellation","রিফান্ড ও বাতিল"],["Disputes & support","ডিসপিউট ও সাপোর্ট"],["Post a Gig — sell worldwide","গিগ পোস্ট করুন — বিশ্বজুড়ে বিক্রি করুন"],["Seller levels","সেলার লেভেল"],["Earnings & withdrawals","আয় ও টাকা তোলা"],["ID / NID verification","ID / NID যাচাই"],["About KAJZO","KAJZO সম্পর্কে"],["Terms of use","ব্যবহারের শর্ত"],["Privacy policy","গোপনীয়তা নীতি"],["FAQ","সাধারণ প্রশ্ন"],
         ["Every conversation you start stays here — tap it any time to continue chatting from where you left off.","আপনার শুরু করা প্রতিটি কথোপকথন এখানেই থাকে — যেকোনো সময় ট্যাপ করে যেখানে শেষ করেছিলেন সেখান থেকে চ্যাট চালিয়ে যান।"],["Sorted by time — newest conversation on top","সময় অনুযায়ী সাজানো — নতুন কথোপকথন উপরে"],["Your inbox is here","আপনার ইনবক্স এখানে"],["Pick a conversation, or tap “Message” on any gig to start chatting with its seller.","একটি কথোপকথন বেছে নিন, অথবা যেকোনো গিগে “মেসেজ” ট্যাপ করে সেলারের সাথে চ্যাট শুরু করুন।"],["No conversations yet.","এখনো কোনো কথোপকথন নেই।"],["Tap “Message seller” on any gig to start one.","শুরু করতে যেকোনো গিগে “সেলারকে মেসেজ করুন” ট্যাপ করুন।"],["Attach a photo or file","ছবি বা ফাইল যোগ করুন"],["What is the final price?","শেষ দাম কত হবে?"],["How fast can you deliver?","কত দ্রুত ডেলিভারি দিতে পারবেন?"],["How many revisions are included?","কয়টি রিভিশন থাকছে?"],["I have started working on it","আমি কাজ শুরু করে দিয়েছি"],["Do you need anything else from me?","আমার কাছ থেকে আর কিছু লাগবে?"],["When do you need the delivery?","ডেলিভারি কবে লাগবে?"],["✓✓ Seen","✓✓ দেখা হয়েছে"],["✓ Sent","✓ পাঠানো হয়েছে"],
         ["← Back","← ফিরে যান"],["← All gigs","← সব গিগ"],["← Back to gig","← গিগে ফিরে যান"],["← Back to Profile","← প্রোফাইলে ফিরে যান"],["Checkout","চেকআউট"],["Package & extras","প্যাকেজ ও এক্সট্রা"],["Requirements","প্রয়োজনীয় তথ্য"],["Payment","পেমেন্ট"],["Order details","অর্ডারের বিবরণ"],["Choose a package","প্যাকেজ বেছে নিন"],["Add extras (optional)","এক্সট্রা যোগ করুন (ঐচ্ছিক)"],["Package","প্যাকেজ"],["Extras","এক্সট্রা"],["Service fee","সার্ভিস ফি"],["Total","মোট"],["Continue →","এগিয়ে যান →"],["Continue to payment →","পেমেন্টে এগিয়ে যান →"],["Your name","আপনার নাম"],["Email","ইমেইল"],["Project requirements — everything the seller needs to know","প্রজেক্টের প্রয়োজনীয় তথ্য — সেলারের যা যা জানা দরকার"],["The clearer you write, the better the delivery. Mention links, colors, sizes — everything.","যত পরিষ্কার করে লিখবেন, ডেলিভারি তত ভালো হবে। লিংক, রং, সাইজ — সবকিছু উল্লেখ করুন।"],["Payment method","পেমেন্টের মাধ্যম"],["Credit / Debit Card","ক্রেডিট / ডেবিট কার্ড"],["Pay instantly with Visa, Mastercard or Amex","Visa, Mastercard বা Amex দিয়ে সাথে সাথে পেমেন্ট করুন"],["You will confirm with your PayPal account","আপনার PayPal অ্যাকাউন্ট দিয়ে নিশ্চিত করবেন"],["Card number","কার্ড নম্বর"],["Name on card","কার্ডে থাকা নাম"],["Expiry","মেয়াদ"],["Your wallet number","আপনার ওয়ালেট নম্বর"],["Transaction ID","ট্রান্সাকশন আইডি"],["Processing payment…","পেমেন্ট প্রক্রিয়াধীন…"],["Submitting order…","অর্ডার জমা হচ্ছে…"],["Payment successful — order placed!","পেমেন্ট সফল — অর্ডার হয়ে গেছে!"],["Order submitted — payment pending verification","অর্ডার জমা হয়েছে — পেমেন্ট যাচাই বাকি"],["Payment pending verification","পেমেন্ট যাচাই বাকি"],["Payment rejected","পেমেন্ট বাতিল হয়েছে"],["Payment not verified","পেমেন্ট যাচাই হয়নি"],["Real payment — real money.","আসল পেমেন্ট — আসল টাকা।"],["bKash / Nagad payment on KAJZO is real: you must actually send the money from your own bKash / Nagad account. Your order is submitted as “Payment pending verification” and only becomes active after your TrxID is checked and the payment is confirmed.","KAJZO-তে বিকাশ / নগদ পেমেন্ট আসল: আপনার নিজের বিকাশ / নগদ অ্যাকাউন্ট থেকে সত্যিই টাকা পাঠাতে হবে। আপনার অর্ডার “পেমেন্ট যাচাই বাকি” হিসেবে জমা হবে এবং সেলার / অ্যাডমিন আপনার TrxID যাচাই করে পেমেন্ট নিশ্চিত করলেই কেবল সক্রিয় হবে।"],["Demo checkout — no real money is charged for card payments in this version.","ডেমো চেকআউট — এই সংস্করণে কার্ড পেমেন্টে আসল টাকা কাটা হয় না।"],["Demo checkout — no real money is charged for PayPal payments in this version.","ডেমো চেকআউট — এই সংস্করণে PayPal পেমেন্টে আসল টাকা কাটা হয় না।"],["Demo only — Rocket checkout in this version does not move real money.","শুধু ডেমো — এই সংস্করণে রকেট চেকআউটে আসল টাকা লেনদেন হয় না।"],["bKash and Nagad are real payments: you send the money yourself to the KAJZO number shown, and the order starts only after your TrxID is verified. Card, PayPal and Rocket are demo options in this version — no real money is charged for them. Once an order is active, payment is held until the work is delivered, and the seller is paid when you accept your order.","বিকাশ ও নগদ আসল পেমেন্ট: দেখানো KAJZO নম্বরে নিজে টাকা পাঠান, আর আপনার TrxID যাচাই হলেই অর্ডার শুরু হয়। কার্ড, PayPal ও রকেট এই সংস্করণে ডেমো অপশন — এগুলোতে আসল টাকা কাটা হয় না। অর্ডার সক্রিয় হলে কাজ ডেলিভারি না হওয়া পর্যন্ত পেমেন্ট ধরে রাখা হয়, আর ডেলিভারি গ্রহণ করলে সেলার পেমেন্ট পান।"],["Real payment — Send Money to the KAJZO bKash number, then enter your TrxID","আসল পেমেন্ট — KAJZO বিকাশ নম্বরে Send Money করুন, তারপর আপনার TrxID দিন"],["Real payment — Send Money to the KAJZO Nagad number, then enter your TrxID","আসল পেমেন্ট — KAJZO নগদ নম্বরে Send Money করুন, তারপর আপনার TrxID দিন"],["Submit order — payment pending verification","অর্ডার জমা দিন — পেমেন্ট যাচাই বাকি"],["Confirm payment — start order","পেমেন্ট নিশ্চিত করুন — অর্ডার শুরু করুন"],["Confirm payment","পেমেন্ট নিশ্চিত করুন"],["Reject payment","পেমেন্ট বাতিল করুন"],["Reject","বাতিল করুন"],["Payment number copied","পেমেন্ট নম্বর কপি হয়েছে"],["Verify this payment","এই পেমেন্ট যাচাই করুন"],["Payment confirmed — order is active","পেমেন্ট নিশ্চিত — অর্ডার সক্রিয় হয়েছে"],["Transaction ID (TrxID)","ট্রান্সাকশন আইডি (TrxID)"],["Sent from","যে নম্বর থেকে পাঠানো হয়েছে"],["Sent to (KAJZO)","প্রাপক নম্বর (KAJZO)"],["Payment status","পেমেন্টের অবস্থা"],["Pending verification","যাচাই বাকি"],["Send Money","Send Money (টাকা পাঠান)"],["Cancel order","অর্ডার বাতিল করুন"],["View my orders","আমার অর্ডার দেখুন"],["Back to gigs","গিগে ফিরে যান"],["Express delivery","এক্সপ্রেস ডেলিভারি"],["Delivered in half the normal time","সাধারণ সময়ের অর্ধেকে ডেলিভারি"],["Extra 2 revisions","অতিরিক্ত ২টি রিভিশন"],["Two more rounds of changes beyond the package","প্যাকেজের বাইরে আরও দুই দফা পরিবর্তন"],["7-day priority support","৭ দিনের অগ্রাধিকার সাপোর্ট"],["Fast help with questions for 7 days after delivery","ডেলিভারির পর ৭ দিন প্রশ্নে দ্রুত সাহায্য"],
