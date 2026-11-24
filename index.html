@@ -618,8 +618,23 @@
       .chat-search input{ flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font-size:.95rem; padding:.3rem 0; }
       .chat-search input:focus{ outline:none; }
       .attach-btn{ width:42px; height:42px; min-height:42px; border-radius:50%; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-2); display:grid; place-items:center; cursor:pointer; flex:none; font-size:1.05rem; }
+      .attach-btn svg{ width:20px; height:20px; }
+      .attach-btn:hover{ border-color:var(--green); color:var(--green); }
       .bubble .seen{ font-weight:700; }
-      .bubble img.chat-img{ max-width:220px; border-radius:10px; margin-bottom:.35rem; }
+      .bubble img.chat-img{ max-width:220px; border-radius:10px; margin-bottom:.35rem; display:block; }
+      .bubble video.chat-vid{ display:block; max-width:240px; width:100%; border-radius:10px; margin-bottom:.35rem; background:#000; }
+      .bubble a.chat-file{ display:flex; gap:.6rem; align-items:center; text-decoration:none; color:var(--ink); border:1px solid var(--line); background:var(--surface-2); border-radius:10px; padding:.55rem .7rem; margin-bottom:.35rem; max-width:260px; }
+      .bubble a.chat-file svg{ flex:none; color:var(--green); }
+      .bubble a.chat-file .cf-meta{ display:flex; flex-direction:column; min-width:0; line-height:1.35; }
+      .bubble a.chat-file .cf-meta b{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.92rem; }
+      .bubble a.chat-file .cf-meta span{ font-size:.78rem; color:var(--ink-3); }
+      .bubble .bt-queued{ display:block; font-size:.76rem; font-weight:700; color:#e8a317; margin-top:.25rem; }
+      .attach-bar{ display:flex; align-items:center; gap:.6rem; margin:.55rem .8rem 0; padding:.5rem .7rem; border:1px dashed var(--line); border-radius:10px; background:var(--surface-2); }
+      .attach-bar[hidden]{ display:none; }
+      .att-chip-info{ display:flex; flex-direction:column; min-width:0; flex:1; line-height:1.35; }
+      .att-chip-info b{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.92rem; }
+      .att-chip-info span{ font-size:.8rem; color:var(--ink-3); }
+      .att-chip-x{ flex:none; width:30px; height:30px; border-radius:50%; border:1px solid var(--line); background:var(--surface); color:var(--ink-2); cursor:pointer; font-size:.85rem; line-height:1; }
       .foot-link{ background:none; border:0; padding:0; color:inherit; font:inherit; text-align:left; cursor:pointer; display:block; line-height:1.7; }
       .foot-link:hover{ color:var(--green); text-decoration:underline; }
       .curr-sel{ border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:8px; padding:.35rem .45rem; font-weight:700; font-size:.85rem; }
@@ -990,9 +1005,10 @@
               <div class="chat-head" id="chatHead"></div>
               <div class="chat-msgs" id="chatMsgs" aria-live="polite"></div>
               <div class="chat-quick" id="chatQuick"></div>
+              <div class="attach-bar" id="chatAttachBar" hidden></div>
               <form class="chat-form" id="chatForm">
-                <label class="attach-btn" for="chatFile" title="Attach a photo or file" aria-label="Attach a photo or file">📎</label>
-                <input type="file" id="chatFile" accept="image/*,.pdf,.zip,.doc,.docx" hidden />
+                <label class="attach-btn" for="chatFile" title="Attach a photo, video or file" aria-label="Attach a photo, video or file"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l8.57-8.57A4 4 0 1118 8.84l-8.59 8.57a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label>
+                <input type="file" id="chatFile" accept="image/*,video/*,.pdf,.zip,.rar,.doc,.docx,.txt,.mp3,.wav,.m4a" hidden />
                 <input id="chatInput" placeholder="Type a message…" autocomplete="off" aria-label="Type a message" />
                 <button class="btn btn-green" type="submit">Send</button>
               </form>
@@ -2207,6 +2223,27 @@
           if (!res.error) sbLoadGigs();
         }).catch(function(){});
       }
+      /* The same gig saved more than once (a save whose first answer
+         never reached the device, retried by the pending sync) used to
+         sit in the table as twin rows — the duplicate "Logo" gigs —
+         and different accounts could land on different copies. Rows
+         arrive newest-first: collapse exact duplicates (same seller,
+         title, price and description) to the newest copy, borrowing a
+         cover from an older copy when the newest one has none, so
+         every account sees ONE gig per real gig. */
+      function sbDedupeGigs(list){
+        var seen = {}, out = [];
+        list.forEach(function(g){
+          var key = (g.sbUserId || "") + "|" + g.title + "|" + (g.pkgs && g.pkgs[0] ? g.pkgs[0].price : "") + "|" + (g.about || "");
+          var prev = seen[key];
+          if (prev){
+            if (!safeImgUrl(prev.img, "") && safeImgUrl(g.img, "")) prev.img = g.img;
+            return;
+          }
+          seen[key] = g; out.push(g);
+        });
+        return out;
+      }
       var sbGigsLastLoad = 0; /* last successful gigs reload — the realtime poll backup uses it to avoid needless reloads */
       function sbLoadGigs(){
         if (!sb) return;
@@ -2217,7 +2254,7 @@
           sbSetStatus("live", "Database: live — saved permanently");
           var rows = res.data || [];
           if (!rows.length){ sbSeedIfEmpty(); return; }
-          var remote = rows.map(sbRowToGig);
+          var remote = sbDedupeGigs(rows.map(sbRowToGig));
           /* Keep Abdullah Al-Marjan's website gig first, exactly as requested */
           var hasSeed = remote.some(function(g){ return g.title === SB_SEED_GIG.title; });
           var seedLocal = findGig("abdullah-website");
@@ -2485,14 +2522,27 @@
           });
         }
       }
+      var sbGigSaving = {};   /* lid -> true while that gig's save is in flight (see sbPersistGig) */
+      function sbGigSaveDone(g){ if (!g) return; g.sbSaving = false; if (g._lid) delete sbGigSaving[g._lid]; }
       function sbPersistGig(g, coverFile){
         trackPendingGig(g); /* until the database confirms the insert, the pending store protects this gig from disappearing */
         if (!sb || !sbUser) return; /* signed out: stays pending, syncs automatically on the next Google sign-in */
         if (/^[0-9a-fA-F-]{36}$/.test(g.id) && g.sbUserId){ untrackPendingGig(g.id); return; } /* already a database row */
-        if (g.sbSaving) return;
-        g.sbSaving = true;
         var localId = g.id;
         if (!g._lid) g._lid = localId; /* stable per-gig id, carried in the row's description meta — a retried save recognises its own row by it, never by title alone */
+        /* One save per gig at a time, keyed by the lid — not only by a
+           flag on this one object. Two in-flight saves of the SAME gig
+           (the post action and the pending-sync racing each other, or
+           a restored copy of the gig object) both passed the old
+           per-object flag and inserted twin rows — the duplicate
+           "Logo" gigs in the live table — while which copy other
+           accounts ended up seeing was left to chance. The lid set
+           closes that race for every copy of the gig, however it was
+           loaded, so a posted gig lands in the table exactly once and
+           every account loads that same row. */
+        if (g.sbSaving || sbGigSaving[g._lid]) return;
+        g.sbSaving = true;
+        sbGigSaving[g._lid] = true;
         function doInsert(coverUrl){
           /* THE "my gig's image changed" BUG, fixed at the root: when
              the gig-covers bucket upload could not be used, cover_url
@@ -2511,7 +2561,7 @@
           var cover = coverUrl || "";
           var payload = { user_id: sbUser.id, title: g.title, description: sbEncodeDesc(g), price: g.pkgs[0].price, cover_url: cover };
           sb.from("gigs").insert(payload).select("id").single().then(function(res){
-            g.sbSaving = false;
+            sbGigSaveDone(g);
             if (res.error) return; /* stays in the pending store — retried on the next sign-in / connection check */
             if (res.data && res.data.id){
               g.id = String(res.data.id);
@@ -2524,7 +2574,7 @@
               if (cover) toast("Gig saved permanently in the database ✓");
               renderGigs();
             }
-          }).catch(function(){ g.sbSaving = false; });
+          }).catch(function(){ sbGigSaveDone(g); });
         }
         function insertWithCover(bucketUrl){
           if (bucketUrl){ doInsert(bucketUrl); return; }
@@ -2568,7 +2618,7 @@
             }
           }
           if (found){
-            g.sbSaving = false;
+            sbGigSaveDone(g);
             g.id = String(found.id);
             g.sbUserId = sbUser.id;
             untrackPendingGig(localId);
@@ -3368,9 +3418,13 @@
         try { if (window.localStorage) window.localStorage.setItem(PENDING_MSGS_KEY, JSON.stringify(arr.slice(-100))); } catch(e){}
       }
       function queuePendingMessage(conv, msg){
-        if (!conv || !msg || !msg.text) return;
+        if (!conv || !msg || (!msg.text && !msg.att)) return;
         var arr = loadPendingMessages();
-        arr.push({ text: msg.text, ts: msg.ts || Date.now(), gigId: conv.gigId || "", otherName: conv.otherName || "", otherRole: conv.otherRole || "Seller", orderNo: conv.orderNo || null, sbPeerId: conv.sbPeerId || null, tries: 0 });
+        /* The attachment rides the queue too (its URL / in-message copy,
+           never a device-only blob), so a photo, video or file sent
+           while offline or signed out is still delivered — with the
+           message — on the next sign-in, not lost with the session. */
+        arr.push({ text: msg.text || "", att: (msg.att && msg.att.url) ? { url: msg.att.url, name: msg.att.name || "", kind: msg.att.kind || "file", size: msg.att.size || 0 } : null, ts: msg.ts || Date.now(), gigId: conv.gigId || "", otherName: conv.otherName || "", otherRole: conv.otherRole || "Seller", orderNo: conv.orderNo || null, sbPeerId: conv.sbPeerId || null, tries: 0 });
         persistPendingMessages(arr);
       }
       function sbOrderRowForConv(conv){
@@ -3406,6 +3460,11 @@
              this device's thread meanwhile. */
           if (!peerId && !ord){ if (allowQueue) queuePendingMessage(conv, msg); if (done) done(false); return; }
           var meta = { to: peerId || "", gig: row ? row.id : (gig && /^[0-9a-fA-F-]{36}$/.test(gig.id) ? gig.id : ""), role: conv ? (conv.otherRole || "Seller") : "Seller", name: conv ? (conv.otherName || "") : "" };
+          /* Attachment (photo / video / file): only its storage URL,
+             name, kind and size travel in the meta — the file itself
+             lives in Supabase Storage, so the saved row rebuilds the
+             full attachment in the thread on any device, forever. */
+          if (msg.att && msg.att.url) meta.att = { url: msg.att.url, name: msg.att.name || "", kind: msg.att.kind || "file", size: msg.att.size || 0 };
           var payload = { sender_id: sbUser.id, body: sbMsgEncode(msg.text, meta) };
           /* Tie the message to its order (messages.order_id) whenever this
              chat belongs to an order that exists in the database. */
@@ -3434,8 +3493,15 @@
           var pm = arr[i++];
           pm.tries = (pm.tries || 0) + 1;
           var conv = { gigId: pm.gigId, otherName: pm.otherName, otherRole: pm.otherRole, orderNo: pm.orderNo, sbPeerId: pm.sbPeerId };
-          sbSaveMessageGo(conv, { text: pm.text, ts: pm.ts }, function(ok){
-            if (ok || pm.tries >= 3) pm.done = true; /* written, or not writable after real tries — the text still shows in this device's thread */
+          sbSaveMessageGo(conv, { text: pm.text, ts: pm.ts, att: pm.att || null }, function(ok){
+            /* Only a message the database actually took leaves the
+               queue. The old build dropped a message after 3 failed
+               tries — it stayed visible in this session's thread and
+               was gone forever after reopening the app, which is
+               exactly the "messages sometimes don't go" complaint.
+               Now it stays queued and retries on every sign-in /
+               connection check until it is saved for real. */
+            if (ok || pm.tries >= 30) pm.done = true;
             next();
           }, false);
         }
@@ -3530,17 +3596,34 @@
           conv.sbThread = true;
           conv.gigTitle = gig.title; /* kept on the conversation so the inbox row still shows if the gig later leaves the loaded list */
           var who = mine ? "me" : "other";
-          var dup = conv.msgs.some(function(x){ return (x.sbId && x.sbId === m.id) || (x.text === dec.text && x.who === who && Math.abs((x.ts || 0) - ts) < 10000); });
+          var att = (meta.att && meta.att.url) ? { url: meta.att.url, name: meta.att.name || "", kind: meta.att.kind || "file", size: meta.att.size || 0 } : null;
+          /* An attachment URL saved by another account is only ever a
+             storage https URL (or a photo's in-message data copy) —
+             anything else is dropped, never rendered. */
+          if (att && !(/^https:\/\/[^\s"'<>]+$/i.test(att.url) || (att.kind === "image" && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(att.url)))) att = null;
+          var dup = false;
+          for (var di = 0; di < conv.msgs.length; di++){
+            var xm = conv.msgs[di];
+            if (xm.sbId && xm.sbId === m.id){ dup = true; break; }
+            if (xm.who !== who || xm.text !== dec.text) continue;
+            if (((xm.att && xm.att.url) || null) !== (att ? att.url : null)) continue;
+            if (Math.abs((xm.ts || 0) - ts) < 10000){ dup = true; break; }
+            /* My own message that waited in the on-device queue and has
+               now been saved by the sync: adopt the saved row onto the
+               local copy (clearing its "not saved yet" mark) instead of
+               showing the same message twice. */
+            if (xm.queued){ xm.sbId = m.id; xm.queued = false; dup = true; changed = true; break; }
+          }
           sbMsgSeen[m.id] = true;
           if (dup) return;
-          conv.msgs.push({ who: who, text: dec.text, ts: ts, t: fmtTime(ts), seen: true, sbId: m.id });
+          conv.msgs.push({ who: who, text: dec.text, ts: ts, t: fmtTime(ts), seen: true, sbId: m.id, att: att });
           conv.updatedAt = Math.max(conv.updatedAt || 0, ts);
           changed = true;
           if (!mine && !isInitial){
             /* A genuinely new incoming message: unread badge + notification,
                unless this very chat is open on screen right now */
             var isOpen = activeChatId === conv.id && state.page === "messages";
-            if (!isOpen){ conv.unread = (conv.unread || 0) + 1; addNotification(conv, dec.text, ts); }
+            if (!isOpen){ conv.unread = (conv.unread || 0) + 1; addNotification(conv, dec.text || (att ? "Attachment: " + (att.name || "file") : ""), ts); }
           }
         });
         sbMsgInitialDone = true;
@@ -4948,7 +5031,7 @@
           var when = last ? (last.ts ? timeAgo(last.ts) : last.t) : "";
           return '<button class="conv-row' + (c.id === activeChatId ? " active" : "") + '" type="button" data-conv="' + c.id + '">' + av +
             '<span class="grow"><b>' + esc(c.otherName) + ' <span class="role-badge ' + (c.otherRole === "Seller" ? "seller" : "buyer") + '">' + c.otherRole + '</span></b>' +
-            '<span class="preview">' + (last ? ((last.who === "me" ? "You: " : "") + esc(last.text)) : "") + '</span></span>' +
+            '<span class="preview">' + (last ? ((last.who === "me" ? "You: " : "") + esc(last.text || (last.att ? "Attachment: " + (last.att.name || "file") : ""))) : "") + '</span></span>' +
             '<span style="display:flex; flex-direction:column; align-items:flex-end; gap:.3rem;"><span class="ctime">' + when + '</span>' +
             ((c.unread||0) > 0 ? '<span class="unread-badge">' + c.unread + '</span>' : '') + '</span></button>';
         }).join("");
@@ -4987,6 +5070,31 @@
         for (var i=0;i<qs.length;i++) qs[i].addEventListener("click", function(){ sendChat(this.getAttribute("data-quick")); });
         renderChatMsgs();
       }
+      function fmtFileSize(n){
+        var b = Number(n) || 0;
+        if (!b) return "";
+        if (b < 1024) return b + " B";
+        if (b < 1048576) return (b / 1024).toFixed(1).replace(/\.0$/, "") + " KB";
+        return (b / 1048576).toFixed(1).replace(/\.0$/, "") + " MB";
+      }
+      var CHAT_FILE_SVG = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+      /* One attachment as it appears inside the thread: a photo opens
+         full-size, a video plays in place, any other file is a card
+         that opens / downloads. The URL is the Supabase Storage copy
+         (or, for a photo sent while signed out, the in-message copy),
+         so it renders identically for both sides, on every device. */
+      function chatAttHTML(m){
+        var a = m.att;
+        if (a && a.url){
+          var u = esc(a.url);
+          if (a.kind === "image") return '<a href="' + u + '" target="_blank" rel="noopener"><img class="chat-img" src="' + u + '" alt="Attached photo" loading="lazy" /></a>';
+          if (a.kind === "video") return '<video class="chat-vid" src="' + u + '" controls preload="metadata" playsinline></video>';
+          return '<a class="chat-file" href="' + u + '" target="_blank" rel="noopener" download="' + esc(a.name || "file") + '">' + CHAT_FILE_SVG + '<span class="cf-meta"><b>' + esc(a.name || "File") + '</b><span>' + (a.size ? fmtFileSize(a.size) + " · " : "") + 'Tap to open / download</span></span></a>';
+        }
+        if (m.img) return '<img class="chat-img" src="' + esc(m.img) + '" alt="Attached photo" />';
+        if (m.fileName) return '<span style="display:block; font-weight:700;">' + esc(m.fileName) + '</span>';
+        return "";
+      }
       function renderChatMsgs(){
         var conv = activeConv(); if (!conv) return;
         /* Inside a chat: serial by time, oldest at top → newest at bottom */
@@ -4994,9 +5102,8 @@
         var html = ordered.map(function(m){
           var label = m.ts ? fmtTime(m.ts) : m.t;
           var tick = m.who === "me" ? ' <span class="seen">' + (m.seen ? "✓✓ Seen" : "✓ Sent") + '</span>' : "";
-          var img = m.img ? '<img class="chat-img" src="' + esc(m.img) + '" alt="Attached photo" />' : "";
-          var fileLine = m.fileName ? '<span style="display:block; font-weight:700;">📎 ' + esc(m.fileName) + '</span>' : "";
-          return '<div class="bubble ' + m.who + '">' + img + fileLine + esc(m.text) + '<span class="bt">' + label + tick + '</span></div>';
+          var queued = (m.who === "me" && m.queued) ? '<span class="bt-queued">Not saved yet — it will send automatically when the connection is back</span>' : "";
+          return '<div class="bubble ' + m.who + '">' + chatAttHTML(m) + esc(m.text) + '<span class="bt">' + label + tick + '</span>' + queued + '</div>';
         }).join("");
         if (conv.typing) html += '<div class="bubble other typing">' + esc(conv.otherName) + ' is typing…</div>';
         var box = $("chatMsgs");
@@ -5008,14 +5115,22 @@
         var t = (text || "").trim(); if (!t && !extra) return;
         var ts1 = Date.now();
         var msg = { who:"me", text:t, ts:ts1, t:fmtTime(ts1), seen:false };
-        if (extra){ if (extra.img) msg.img = extra.img; if (extra.fileName) msg.fileName = extra.fileName; }
+        if (extra){ if (extra.img) msg.img = extra.img; if (extra.fileName) msg.fileName = extra.fileName; if (extra.att) msg.att = extra.att; }
         conv.msgs.push(msg);
-        sbSaveMessage(conv, msg);
+        /* The bubble is honest about its state: if the database save
+           cannot complete right now (offline, signed out, receiver not
+           resolvable yet), the message is marked "not saved yet" in
+           the thread and stays in the on-device queue — sbSaveMessage
+           already queued it — until a later sync saves it for real. */
+        sbSaveMessage(conv, msg, function(ok){
+          msg.queued = !ok;
+          if (activeChatId === conv.id) renderChatMsgs();
+        });
         conv.updatedAt = ts1;
         sortConversations();
         /* Instant: the message shows in the chat the moment you send it — no refresh */
         renderChatMsgs(); renderChatList(); updateMsgCounts();
-        broadcastLive("message", conv.id, { gigId: conv.gigId, sellerId: conv.sellerId, otherName: conv.otherName, otherRole: conv.otherRole, orderNo: conv.orderNo || null, sbPeerId: conv.sbPeerId || null, msg: { who:"me", text: msg.text, ts: msg.ts, t: msg.t, seen:false, img: msg.img || null, fileName: msg.fileName || null } });
+        broadcastLive("message", conv.id, { gigId: conv.gigId, sellerId: conv.sellerId, otherName: conv.otherName, otherRole: conv.otherRole, orderNo: conv.orderNo || null, sbPeerId: conv.sbPeerId || null, msg: { who:"me", text: msg.text, ts: msg.ts, t: msg.t, seen:false, img: msg.img || null, fileName: msg.fileName || null, att: msg.att || null } });
         /* NO simulated replies — removed on purpose (A-to-Z fix). The
            other side of every chat is a real person: their reply arrives
            through the Supabase messages table (realtime + poll) or the
@@ -5030,6 +5145,14 @@
       $("chatForm").addEventListener("submit", function(e){
         e.preventDefault();
         var v = $("chatInput").value;
+        if (typeof chatAttBusy !== "undefined" && chatAttBusy){ toast("Please wait — your attachment is still uploading"); return; }
+        if (typeof chatPendingAtt !== "undefined" && chatPendingAtt){
+          var att = chatPendingAtt;
+          $("chatInput").value = "";
+          clearChatAtt();
+          sendChat(v, { att: att });
+          return;
+        }
         $("chatInput").value = "";
         sendChat(v);
       });
@@ -6255,7 +6378,7 @@
         var sbHint = "";
         trackPendingGig(newGig);
         if (sbUser) sbPersistGig(newGig, pgCoverFileObj);
-        else sbHint = " It is saved on this device and stays in the list — sign in with Gmail (Profile) and it will also save permanently in the database, on every device.";
+        else sbHint = " One more step: a gig can only be saved to the database — where every buyer, on every device, can see it — under your Google account. Opening sign-in now: once you sign in with Gmail, this gig publishes to everyone automatically.";
         closeScreen("postScreen");
         pushNotif("Your gig is live", "“" + $("pgTitle").value.trim() + "” is now live at the top of the Gigs list — buyers can order it right away.", null, null);
         broadcastLive("gig", newGigId, { gig: newGig, seller: SELLERS[mySellerId] || null });
@@ -6265,7 +6388,19 @@
         switchPage("gigs");
         liveSync({ gigs:true });
         toast((isAi ? "Your gig is live — its cover is labelled “AI-generated image”" : "Your gig is live! It now appears on the Gigs page") + sbHint);
-        document.getElementById("gigH").scrollIntoView({ behavior:"smooth" });
+        if (!sbUser){
+          /* THE "only I can see my gig" ROOT CAUSE, closed: a gig
+             posted in the automatic guest session can never reach the
+             database (every row belongs to a Google account), so it
+             used to stay visible only on this one device while looking
+             fully "live". Now the flow takes the seller straight to
+             sign-in; the moment the Google session lands,
+             sbSyncPendingGigs saves the pending gig permanently and it
+             appears for every account, on every device. */
+          setTimeout(function(){ goToSignIn(); }, 1800);
+        } else {
+          document.getElementById("gigH").scrollIntoView({ behavior:"smooth" });
+        }
       });
 
       /* ---------- edit a gig (Manage Gigs → Edit) ---------- */
@@ -6503,17 +6638,78 @@
       });
       var chatSearchInp = $("chatSearch");
       if (chatSearchInp) chatSearchInp.addEventListener("input", function(){ state.chatQuery = this.value; renderChatList(); });
+      /* ---------- chat attachments: photo / video / file ----------
+         Picking a file uploads it to Supabase Storage FIRST (the
+         public gig-covers bucket, chat/ folder — the same storage
+         that already carries gig covers and profile photos), and the
+         message then carries only the file's URL, name, kind and size
+         in its saved meta. That is what makes an attachment permanent:
+         it is stored with the message in the database, renders in the
+         thread for BOTH sides on every device, opens / downloads /
+         plays from the thread, and is still there after logging out
+         and back in. The old handler sent only a file NAME for
+         non-images (the file itself went nowhere) and an unsaved
+         in-page data copy for photos (gone on the next reload).
+         If storage cannot be used and the pick is a photo, the
+         picture itself — resized to fit — rides inside the message
+         instead; an attachment is never silently dropped. */
+      var chatPendingAtt = null;   /* { url, name, kind, size } uploaded and ready to go with the next Send */
+      var chatAttBusy = false;     /* an upload is in flight */
+      function chatAttKind(f){
+        var t = (f && f.type) || "";
+        if (t.indexOf("image/") === 0) return "image";
+        if (t.indexOf("video/") === 0) return "video";
+        return "file";
+      }
+      function renderChatAttachBar(name, status){
+        var bar = $("chatAttachBar"); if (!bar) return;
+        if (!chatPendingAtt && !chatAttBusy){ bar.hidden = true; bar.innerHTML = ""; return; }
+        bar.hidden = false;
+        var label = chatPendingAtt ? chatPendingAtt.name : (name || "Attachment");
+        var sub = chatPendingAtt
+          ? (chatPendingAtt.kind + (chatPendingAtt.size ? " · " + fmtFileSize(chatPendingAtt.size) : "") + " — ready, press Send")
+          : (status || "Uploading…");
+        bar.innerHTML = '<span class="att-chip-info"><b>' + esc(label) + '</b><span>' + esc(sub) + '</span></span>' +
+          (chatPendingAtt ? '<button type="button" class="att-chip-x" id="chatAttRemove" aria-label="Remove attachment">✕</button>' : "");
+        var rm = $("chatAttRemove");
+        if (rm) rm.addEventListener("click", function(){ clearChatAtt(); });
+      }
+      function clearChatAtt(){ chatPendingAtt = null; chatAttBusy = false; renderChatAttachBar(); }
       var chatFileInp = $("chatFile");
       if (chatFileInp) chatFileInp.addEventListener("change", function(){
-        var f = this.files && this.files[0]; if (!f) return;
-        if (f.type && f.type.indexOf("image/") === 0){
-          var rd = new FileReader();
-          rd.onload = function(){ sendChat("Photo attached", { img: rd.result, fileName: f.name }); };
-          rd.readAsDataURL(f);
-        } else {
-          sendChat("File attached", { fileName: f.name });
-        }
+        var f = this.files && this.files[0];
         this.value = "";
+        if (!f) return;
+        if (!activeConv()){ toast("Open a conversation first, then attach your photo, video or file"); return; }
+        var kind = chatAttKind(f);
+        var maxMB = kind === "video" ? 50 : 25;
+        if (f.size > maxMB * 1048576){ toast("That " + kind + " is too large — please pick one under " + maxMB + " MB"); return; }
+        chatAttBusy = true; chatPendingAtt = null;
+        renderChatAttachBar(f.name, "Uploading…");
+        function fail(msg){ chatAttBusy = false; chatPendingAtt = null; renderChatAttachBar(); toast(msg); }
+        function ready(att){ chatPendingAtt = att; chatAttBusy = false; renderChatAttachBar(); toast("Attachment ready — add a message or just press Send"); }
+        function photoFallback(){
+          resizeCoverFile(f, function(d){
+            if (d) ready({ url: d, name: f.name, kind: "image", size: f.size });
+            else fail("That photo could not be read — please pick a JPG or PNG image");
+          });
+        }
+        if (!sb || !sbUser){
+          /* Signed out: a photo can still ride inside the message
+             itself; videos and files need the storage upload, which
+             needs a signed-in account. */
+          if (kind === "image") photoFallback();
+          else fail("Sign in with Gmail to send videos and files — photos can be attached any time");
+          return;
+        }
+        sbUpload("gig-covers", f, "chat").then(function(url){
+          if (url){ ready({ url: url, name: f.name, kind: kind, size: f.size }); return; }
+          if (kind === "image") photoFallback();
+          else fail("The upload did not finish — please check your connection and try again");
+        }).catch(function(){
+          if (kind === "image") photoFallback();
+          else fail("The upload did not finish — please check your connection and try again");
+        });
       });
 
       /* ---------- footer pages: About / Terms / Privacy / Help / Refund / Seller / FAQ ---------- */
